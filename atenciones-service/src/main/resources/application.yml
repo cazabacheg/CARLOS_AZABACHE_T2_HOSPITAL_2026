@@ -16,6 +16,8 @@ hospital:
     port: ${RABBIT_PORT:5672}
     username: ${RABBIT_USER:hospital}
     password: ${RABBIT_PASSWORD}
+  atencion:
+    minutos-antes: ${ATENCION_MINUTOS_ANTES:30}
   clientes:
     citas:
       url: http://citas-service
