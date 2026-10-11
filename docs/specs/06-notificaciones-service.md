@@ -30,19 +30,20 @@ Cola `notificaciones.cola` (durable), DLQ `notificaciones.dlq`, exchange `hospit
 
 | Fase | Routing key | Plantilla del mensaje |
 |---|---|---|
-| **A — normal** | `paciente.registrado` | "Bienvenido/a al Hospital Vida Salud. Su registro fue exitoso." |
-| A | `cita.creada` | "Su cita de {especialidadNombre} fue registrada para el {fechaHora}. Está pendiente de confirmación." |
-| A | `cita.confirmada` | "Su cita de {especialidadNombre} del {fechaHora} fue confirmada." |
-| A | `cita.reprogramada` | "Su cita de {especialidadNombre} fue reprogramada del {fechaHoraAnterior} al {fechaHora}." |
-| A | `cita.cancelada` | "Su cita de {especialidadNombre} del {fechaHora} fue cancelada." |
-| **B — baja prioridad (al final)** | `atencion.registrada` | "Su atención en {areaNombre} fue registrada el {fechaAtencion}." |
+| **A — normal** | `paciente.registrado` | "Bienvenido/a al Hospital Vida Salud. Su registro fue exitoso (paciente {pacienteId})." |
+| A | `cita.creada` | "Su cita {codigo} de {especialidadNombre} fue registrada para el {fechaHora}. Está pendiente de confirmación." |
+| A | `cita.confirmada` | "Su cita {codigo} de {especialidadNombre} del {fechaHora} fue confirmada." |
+| A | `cita.reprogramada` | "Su cita {codigo} de {especialidadNombre} fue reprogramada del {fechaHoraAnterior} al {fechaHora}." |
+| A | `cita.cancelada` | "Su cita {codigo} de {especialidadNombre} del {fechaHora} fue cancelada." |
+| **B — baja prioridad (al final)** | `atencion.registrada` | "Su atención {codigo} en {areaNombre} fue registrada el {fechaAtencion} (cita {citaId})." |
 | B | `pago.registrado` | "Se registró su pago de S/ {monto} (operación {numeroOperacion})." |
 | B | `pago.anulado` | "Su pago con operación {numeroOperacion} fue anulado." |
 
 * La fase B consiste **solo** en agregar sus bindings y plantillas; no cambia el diseño.
 * No se notifican `cita.atendida`, `cita.ausente` ni `paciente.estado-cambiado` (no los pide el enunciado §13).
 * Formatos: fechas `dd/MM/yyyy HH:mm` en hora de Lima; monto con 2 decimales.
-* Los mensajes **no contienen datos personales** (los eventos no los traen, spec 02 D-13).
+* Los mensajes **no contienen datos personales** (los eventos no los traen, spec 02 D-13), pero **sí identificadores** legibles del recurso (código de cita `CIT-…`, de atención `ATE-…`, número de operación `OP-…`) para que el aviso sea trazable (D-35).
+* Cada notificación guarda además `eventId`, `tipoEvento`, `recursoId` y `pacienteId`: desde una notificación se llega al evento en Auditoría y al recurso en su servicio.
 
 ## 4. Modelo
 
@@ -67,7 +68,7 @@ Por cada mensaje (`ConsumidorEventos` de la spec 00):
 2. `PlantillasNotificacion.generar(tipo, datos)` → texto. Tipo sin plantilla → no debería llegar (bindings explícitos); si llega, se registra `WARN` y se confirma sin guardar.
 3. Guardar `Notificacion` con `event_id` del sobre.
    * `DuplicateKeyException` (evento repetido) → se considera procesado → `ack` (idempotencia, documento §5.7).
-4. Registrar `INFO`: `notificacion simulada enviada eventId=… tipo=… pacienteId=…` (sin el texto).
+4. Registrar `INFO`: `notificacion simulada enviada eventId=… tipo=… recursoId=… pacienteId=…` (sin el texto).
 5. `ack`.
 
 Errores de BD transitorios → 3 reintentos (spec 00) → DLQ.
@@ -89,7 +90,7 @@ No hay endpoints de escritura: las notificaciones solo nacen de eventos.
 
 | Clase | Tipo | Casos |
 |---|---|---|
-| `PlantillasNotificacionTest` | Unitaria | Un caso por cada tipo de las fases A y B: texto esperado con fecha en hora de Lima (evento con offset UTC) y monto `80.00`; tipo desconocido → vacío |
+| `PlantillasNotificacionTest` | Unitaria | Un caso por cada tipo de las fases A y B: texto esperado con el código del recurso, fecha en hora de Lima (evento con offset UTC) y monto `80.00`; tipo desconocido → vacío |
 | `NotificacionServiceTest` | `StepVerifier` + Mockito | Guarda con `eventId` y `pacienteId` del sobre; `DuplicateKeyException` → completa sin error |
 | `NotificacionControllerTest` | `@WebFluxTest` | Listado filtrado con `X-Total-Count`; `GET` inexistente → 404 |
 | `NotificacionesConsumerIT` | PostgreSQL + RabbitMQ | **Publicar `cita.confirmada` en `hospital.eventos` → aparece una fila con el mensaje esperado** (evento del enunciado §20); el mismo evento dos veces → **una** sola fila; mensaje con JSON inválido → termina en `notificaciones.dlq`; evento no enlazado (`cita.atendida`) → no llega a la cola |
@@ -102,18 +103,18 @@ No hay endpoints de escritura: las notificaciones solo nacen de eventos.
 - [ ] Al confirmar una cita (spec 03), aparece la notificación en `GET /api/notificaciones?pacienteId=…` vía Gateway y en el log.
 - [ ] Con el servicio detenido, confirmar una cita funciona; al arrancarlo, la notificación pendiente se procesa (evidencia de desacople).
 
-## 9. Ajustes que se propagan al documento técnico al aprobar
+## 9. Ajustes propagados al documento técnico (aplicados)
 
 1. §8.3: columna `recurso_id` e índice por `fecha_envio`.
 2. §5.7: bindings explícitos por fase y plantillas finales (incluye `cita.creada`, `pago.anulado`).
 3. §6.4: bindings de `notificaciones.cola` explícitos en lugar de `cita.*` y `pago.*`.
 4. Spec 00 §5.2: mensajes no deserializables van directo a la DLQ.
 
-## 10. Decisiones abiertas para revisión
+## 10. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
-| D-34 | **Bindings explícitos** por routing key (solo lo que se notifica) | Comodines `cita.*`/`pago.*` y descartar en código lo que no interesa |
-| D-35 | Mensajes genéricos sin nombre del paciente (privacidad, D-13) | Llamar a Pacientes para personalizar (agrega dependencia síncrona a un consumidor) |
-| D-36 | Mensaje no deserializable → DLQ inmediata, sin reintentos | Reintentar igual que los demás errores |
-| D-37 | Demostrar el desacople deteniendo Notificaciones y viendo cómo se procesa el pendiente al volver | Solo demostrar el flujo normal |
+| D-34 | **Aprobado:** **Bindings explícitos** por routing key (solo lo que se notifica) | Comodines `cita.*`/`pago.*` y descartar en código lo que no interesa |
+| D-35 | **Aprobado (revisado):** mensajes sin datos personales pero **con identificadores** (códigos de cita/atención, número de operación, ids) para trazabilidad | Llamar a Pacientes para personalizar (agrega dependencia síncrona a un consumidor) |
+| D-36 | **Aprobado:** Mensaje no deserializable → DLQ inmediata, sin reintentos | Reintentar igual que los demás errores |
+| D-37 | **Aprobado:** Demostrar el desacople deteniendo Notificaciones y viendo cómo se procesa el pendiente al volver | Solo demostrar el flujo normal |

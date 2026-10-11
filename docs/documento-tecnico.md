@@ -398,19 +398,21 @@ Versión reducida del Proceso 7: un único concepto de **pago** con su concepto 
 
 **Notificaciones**
 
-* Consume `paciente.registrado` y `cita.*` (prioridad normal); `atencion.registrada` y `pago.*` (**prioridad baja**, se construyen al final).
-* Por cada evento genera una notificación simulada (canal `SIMULADO`, mensaje en español) y la guarda en `notificaciones_db`; además la escribe en el log **sin datos personales sensibles**.
-* `GET /api/notificaciones?pacienteId=` → `Flux` de notificaciones.
+* Consume, con **bindings explícitos** (solo lo que se notifica): `paciente.registrado`, `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada` (prioridad normal); `atencion.registrada`, `pago.registrado`, `pago.anulado` (**prioridad baja**, se agregan al final). No notifica `cita.atendida`, `cita.ausente` ni `paciente.estado-cambiado`.
+* Por cada evento genera una notificación simulada (canal `SIMULADO`, mensaje en español) y la guarda en `notificaciones_db`; además la registra en el log. Los mensajes **no** contienen datos personales, pero **sí identificadores** del recurso (código de cita, de atención, número de operación) y cada registro guarda `eventId`, `recursoId` y `pacienteId` para trazabilidad.
+* `GET /api/notificaciones?pacienteId=&tipoEvento=&fecha=` → `Flux` paginado; `GET /api/notificaciones/{id}`. Solo lectura.
+* Un mensaje corrupto (no deserializable) va directo a `notificaciones.dlq`, sin reintentos.
 
 | Evento | Prioridad | Mensaje simulado |
 |---|---|---|
-| `paciente.registrado` | Normal | "Bienvenido/a al Hospital Vida Salud. Su registro fue exitoso." |
-| `cita.creada` | Normal | "Su cita fue registrada para el {fecha}. Está pendiente de confirmación." |
-| `cita.confirmada` | Normal | "Su cita del {fecha} con {especialidad} fue confirmada." |
-| `cita.reprogramada` | Normal | "Su cita fue reprogramada para el {fecha}." |
-| `cita.cancelada` | Normal | "Su cita del {fecha} fue cancelada." |
-| `atencion.registrada` | Baja | "Su atención del {fecha} fue registrada." |
-| `pago.registrado` | Baja | "Se registró su pago de S/ {monto} (operación {numero})." |
+| `paciente.registrado` | Normal | "Bienvenido/a al Hospital Vida Salud. Su registro fue exitoso (paciente {pacienteId})." |
+| `cita.creada` | Normal | "Su cita {codigo} de {especialidad} fue registrada para el {fecha}. Está pendiente de confirmación." |
+| `cita.confirmada` | Normal | "Su cita {codigo} de {especialidad} del {fecha} fue confirmada." |
+| `cita.reprogramada` | Normal | "Su cita {codigo} de {especialidad} fue reprogramada del {fechaAnterior} al {fecha}." |
+| `cita.cancelada` | Normal | "Su cita {codigo} de {especialidad} del {fecha} fue cancelada." |
+| `atencion.registrada` | Baja | "Su atención {codigo} en {area} fue registrada el {fecha} (cita {citaId})." |
+| `pago.registrado` | Baja | "Se registró su pago de S/ {monto} (operación {numeroOperacion})." |
+| `pago.anulado` | Baja | "Su pago con operación {numeroOperacion} fue anulado." |
 
 **Auditoría**
 
@@ -504,7 +506,7 @@ flowchart LR
     P3["atenciones-service"] -->|"atencion.registrada<br/>atencion.finalizada<br/>atencion.anulada"| X
     P4["pagos-service"] -->|"pago.registrado<br/>pago.anulado"| X
     X{{"hospital.eventos<br/>(topic, durable)"}}
-    X -->|"paciente.registrado, cita.*<br/>atencion.registrada, pago.*"| Q1["notificaciones.cola"]
+    X -->|"paciente.registrado, cita.creada, cita.confirmada,<br/>cita.reprogramada, cita.cancelada,<br/>atencion.registrada, pago.registrado, pago.anulado"| Q1["notificaciones.cola"]
     X -->|"#"| Q2["auditoria.cola"]
     X -->|"atencion.registrada<br/>atencion.anulada"| Q3["citas.atenciones.cola"]
     Q1 --> N["notificaciones-service"]
@@ -519,10 +521,10 @@ flowchart LR
 |---|---|
 | Exchange | `hospital.eventos` — tipo `topic`, durable |
 | Routing keys | `paciente.registrado`, `paciente.estado-cambiado`, `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada`, `cita.atendida`, `cita.ausente`, `atencion.registrada`, `atencion.finalizada`, `atencion.anulada`, `pago.registrado`, `pago.anulado` |
-| Cola de Notificaciones | `notificaciones.cola` — bindings: `paciente.registrado`, `cita.*` (y, al final, `atencion.registrada`, `pago.*`) |
+| Cola de Notificaciones | `notificaciones.cola` — bindings explícitos: `paciente.registrado`, `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada` (y, al final, `atencion.registrada`, `pago.registrado`, `pago.anulado`) |
 | Cola de Auditoría | `auditoria.cola` — binding: `#` |
 | Cola de Citas | `citas.atenciones.cola` — bindings: `atencion.registrada`, `atencion.anulada` |
-| Dead-letter | Exchange `hospital.eventos.dlx` y colas `notificaciones.dlq`, `auditoria.dlq`, `citas.atenciones.dlq` para mensajes que fallan tras reintentos |
+| Dead-letter | Exchange `hospital.eventos.dlx` y colas `notificaciones.dlq`, `auditoria.dlq`, `citas.atenciones.dlq` para mensajes que fallan tras 3 reintentos, o de inmediato si no se pueden deserializar |
 | Productores | `pacientes-service`, `citas-service`, `atenciones-service`, `pagos-service` |
 | Consumidores | `notificaciones-service`, `auditoria-service`, `citas-service` |
 | Formato | JSON, `Content-Type: application/json`, UTF-8 |
@@ -655,11 +657,13 @@ CREATE TABLE notificacion (
   event_id     UUID         NOT NULL UNIQUE,   -- idempotencia
   paciente_id  UUID,
   tipo_evento  VARCHAR(50)  NOT NULL,
+  recurso_id   UUID         NOT NULL,          -- cita, atención, pago… que originó el aviso
   canal        VARCHAR(15)  NOT NULL DEFAULT 'SIMULADO',
   mensaje      VARCHAR(300) NOT NULL,
   fecha_envio  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_notificacion_paciente ON notificacion (paciente_id);
+CREATE INDEX ix_notificacion_fecha ON notificacion (fecha_envio);
 
 CREATE TABLE evento_auditoria (
   id               UUID PRIMARY KEY,
@@ -766,7 +770,7 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 
 ## 9.3 Catálogo de códigos de negocio
 
-`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `FUERA_DE_VENTANA_ATENCION`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`, `CLAVE_IDEMPOTENCIA_REQUERIDA`, `CLAVE_IDEMPOTENCIA_REUTILIZADA`.
+`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `FUERA_DE_VENTANA_ATENCION`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`, `CLAVE_IDEMPOTENCIA_REQUERIDA`, `CLAVE_IDEMPOTENCIA_REUTILIZADA`, `NOTIFICACION_NO_ENCONTRADA`.
 
 ## 9.4 Ejemplos de contrato
 
