@@ -15,6 +15,8 @@ eureka:
     # Solo desarrollo/demostracion: una instancia caida sale del registro en segundos.
     enable-self-preservation: false
     eviction-interval-timer-in-ms: 5000
+    # Sin cache de solo lectura el panel refleja las bajas de inmediato (demostracion).
+    use-read-only-response-cache: false
 management:
   endpoints:
     web:
