@@ -1,6 +1,6 @@
 # Evidencias de ejecucion - Hospital Vida Salud
 
-Generadas el 2026-10-11 con `node scripts/capturar-evidencias.js` (sistema completo en ejecucion; `--sin-caida` omite detener/reiniciar pacientes-service).
+Capturas y salidas del sistema en ejecución (2026-10-11).
 
 | Archivo | Descripcion |
 |---|---|

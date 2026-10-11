@@ -36,9 +36,11 @@ print(f"{n} diagramas renderizados")
 PY
 
 python3 - "${raiz}" "${salida}" <<'PY'
-import base64, html, json, sys
+import base64, html, json, os, sys
 raiz, salida = sys.argv[1:3]
 datos = json.load(open(f"{raiz}/docs/portada.json", encoding="utf-8"))
+for campo in ("subtitulo", "descripcion"):
+    datos[campo] = os.environ.get("PORTADA_" + campo.upper(), datos[campo])
 if "PENDIENTE" in datos["alumno"]:
     print("AVISO: docs/portada.json tiene el nombre del alumno pendiente", file=sys.stderr)
 logo = base64.b64encode(open(f"{raiz}/docs/assets/cibertec-logo.svg", "rb").read()).decode()
