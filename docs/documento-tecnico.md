@@ -1230,3 +1230,11 @@ Corrección: se restaura la prueba en la misma rama; el pipeline vuelve a **verd
 ![Pull request corregido, CI en verde](evidencias/ci-03-pr-corregido-verde.png)
 
 ![Ejecución exitosa de GitHub Actions](evidencias/ci-04-run-exitoso.png)
+
+Historial de ejecuciones y ramas protegidas (escudo junto a `main`, `stage` y `dev`): una ejecución en rojo (el fallo controlado) y las demás en verde, incluidas las promociones `dev` → `stage` → `main` por *pull request*.
+
+![Historial de GitHub Actions](evidencias/ci-05-actions-historial.png)
+
+![Pull requests fusionados](evidencias/ci-06-pull-requests-fusionados.png)
+
+![Ramas protegidas](evidencias/ci-07-ramas-protegidas.png)
