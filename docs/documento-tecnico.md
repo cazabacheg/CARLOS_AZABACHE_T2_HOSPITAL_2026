@@ -87,6 +87,9 @@ El enunciado permite justificar la profundidad de cada servicio. Esta es la deci
 | RN-12 | Al registrarse una atención, la cita pasa a `ATENDIDA` (consistencia eventual por evento). | Citas (reacciona al evento) |
 | RN-13 | Un pago se asocia a un paciente existente y activo. | Pagos |
 | RN-14 | Dos cambios simultáneos sobre la misma cita no pueden pisarse: el segundo se rechaza (bloqueo optimista). | Citas |
+| RN-15 | Una cita solo se puede **cancelar o reprogramar hasta 24 horas antes** de su inicio. Después se da por efectuada: solo puede terminar `ATENDIDA` o `AUSENTE`. | Citas |
+| RN-16 | La atención solo se registra **desde 30 minutos antes** del inicio de la cita en adelante. | Atenciones |
+| RN-17 | Si se anula una atención y la cita **aún no ocurrió**, la cita pasa a `CANCELADA`; si ya ocurrió, sigue `ATENDIDA` y la anulación queda como corrección administrativa. `CANCELADA` es final: para reagendar se crea una cita nueva. | Citas (reacciona al evento) |
 
 ## 2.4 Supuestos de la agenda simplificada
 
@@ -101,6 +104,9 @@ El enunciado permite modelar una agenda simplificada si se documentan los supues
 * **A-07.** Las citas se programan con un máximo de **90 días** de anticipación.
 * **A-08.** La especialidad se elige de un **catálogo cerrado**: Medicina General, Pediatría, Cardiología, Ginecología, Traumatología, Dermatología, Oftalmología (códigos `MEDICINA_GENERAL`, `PEDIATRIA`, …).
 * **A-09.** No se valida la hora para marcar `AUSENTE` o `CONFIRMADA` (simplificación para poder demostrarlo con citas futuras).
+* **A-10.** Los parámetros de agenda (días y horario de atención, bloque, anticipación máxima, plazo de cambio de 24 h, ventana de atención de 30 min) son **configurables** por propiedades/variables de entorno. Los valores de arriba son los predeterminados; permite, por ejemplo, demostrar el sistema un domingo sin cambiar código.
+
+**Por qué RN-15 y RN-16 juntas.** Las ventanas "cancelar hasta 24 h antes" y "atender desde 30 min antes" no se superponen. Así se **elimina por regla de negocio** la carrera "se cancela la cita mientras se registra su atención", que de otro modo exigiría una saga con compensación entre servicios.
 
 ## 2.5 Estados y transiciones — vista de negocio
 
@@ -125,10 +131,10 @@ Se evitó deliberadamente crear servicios por tabla o por capa (p. ej. un "servi
 | `eureka-server` | 8761 | Registro y descubrimiento | — | — | — | — |
 | `api-gateway` | 8080 | Punto de entrada único, enrutamiento | — | — | — | Todos (vía Eureka) |
 | `pacientes-service` | 8081 | Alta, consulta, actualización y estado de pacientes; detección de duplicados | `pacientes_db` | `paciente.registrado`, `paciente.estado-cambiado` | — | — |
-| `citas-service` | 8082 | Programación, reprogramación, estados de citas; reglas de agenda | `citas_db` | `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada`, `cita.atendida`, `cita.ausente` | `atencion.registrada` | `pacientes-service` |
+| `citas-service` | 8082 | Programación, reprogramación, estados de citas; reglas de agenda | `citas_db` | `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada`, `cita.atendida`, `cita.ausente` | `atencion.registrada`, `atencion.anulada` | `pacientes-service` |
 | `notificaciones-service` | 8083 | Genera y guarda notificaciones simuladas | `notificaciones_db` | — | `paciente.registrado`, `cita.*`; (baja prioridad) `atencion.registrada`, `pago.*` | — |
 | `auditoria-service` | 8084 | Registra trazabilidad de cambios de estado | `auditoria_db` | — | `#` (todos) | — |
-| `atenciones-service` | 8085 | Registro administrativo de la atención vinculada a una cita confirmada | `atenciones_db` | `atencion.registrada`, `atencion.estado-cambiado` | — | `citas-service` |
+| `atenciones-service` | 8085 | Registro administrativo de la atención vinculada a una cita confirmada | `atenciones_db` | `atencion.registrada`, `atencion.finalizada`, `atencion.anulada` | — | `citas-service` |
 | `pagos-service` | 8086 | Registro y anulación de pagos simulados; validación de monto y operación única | `pagos_db` | `pago.registrado`, `pago.anulado` | — | `pacientes-service` |
 
 ## 3.3 Propiedad de los datos
@@ -335,7 +341,7 @@ Los listados (`GET` de colecciones) aceptan `pagina` y `tamano` y devuelven el t
 | `PUT /api/citas/{id}/reprogramar` | `200`, estado vuelve a `PENDIENTE` | `400`, `404`, `409` choque, misma fecha, estado no permite reprogramar o modificación concurrente |
 | `PATCH /api/citas/{id}/estado` `{ "estado": "CONFIRMADA", "motivo": "..." }` | `200`. Destinos admitidos: `CONFIRMADA`, `CANCELADA`, `AUSENTE` | `404`, `409` transición no permitida (incluye pedir `ATENDIDA` o `PENDIENTE`) o modificación concurrente |
 
-Códigos de error de negocio devueltos en el cuerpo (ver §9.3): `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `CONFLICTO_CONCURRENTE`, `SERVICIO_PACIENTES_NO_DISPONIBLE`.
+Códigos de error de negocio devueltos en el cuerpo (ver §9.3): `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `CONFLICTO_CONCURRENTE`, `SERVICIO_PACIENTES_NO_DISPONIBLE`.
 
 **Eventos publicados:** `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada`, `cita.atendida`, `cita.ausente`.
 
@@ -343,7 +349,7 @@ Códigos de error de negocio devueltos en el cuerpo (ver §9.3): `PACIENTE_NO_EN
 
 Registro administrativo de la atención simulada; no guarda historia clínica.
 
-**Entidad `atencion`**: `id` (UUID), `codigo` (único, p. ej. `ATE-20261015-0001`), `paciente_id` (copiado de la cita), `cita_id`, `fecha_atencion`, `area`, `estado`, `fecha_creacion`, `fecha_actualizacion`.
+**Entidad `atencion`**: `id` (UUID), `codigo` (único, formato `ATE-yyyyMMdd-NNNNNN`), `paciente_id` (copiado de la cita), `cita_id`, `fecha_atencion`, `area` (catálogo: `CONSULTA_EXTERNA`, `EMERGENCIA`, `TRIAJE`, `PROCEDIMIENTOS`), `estado`, `fecha_creacion`, `fecha_actualizacion`, `version`.
 
 **Estados:** `REGISTRADA` → `FINALIZADA` o `ANULADA`. `FINALIZADA` y `ANULADA` son finales.
 
@@ -351,16 +357,16 @@ Registro administrativo de la atención simulada; no guarda historia clínica.
 
 | Método y ruta | Resultado | Errores |
 |---|---|---|
-| `POST /api/atenciones` `{ "citaId", "area" }` | `201` atención `REGISTRADA` | `400` validación; `404` cita inexistente; `409` la cita no está `CONFIRMADA` o ya tiene atención (`ATENCION_DUPLICADA`); `503`/`504` Citas no disponible |
+| `POST /api/atenciones` `{ "citaId", "area" }` | `201` atención `REGISTRADA` | `400` validación; `404` cita inexistente; `409` la cita no está `CONFIRMADA`, falta más de 30 min para la cita (`FUERA_DE_VENTANA_ATENCION`) o ya tiene atención (`ATENCION_DUPLICADA`); `503`/`504` Citas no disponible |
 | `GET /api/atenciones/{id}` | `200` | `404` |
-| `GET /api/atenciones?pacienteId=&citaId=&estado=` | `200` `Flux` | — |
-| `PATCH /api/atenciones/{id}/estado` | `200` | `404`, `409` transición no permitida |
+| `GET /api/atenciones?pacienteId=&citaId=&estado=&area=&fecha=` | `200` `Flux` paginado | — |
+| `PATCH /api/atenciones/{id}/estado` (destinos `FINALIZADA`, `ANULADA`) | `200` | `404`, `409` transición no permitida o modificación concurrente |
 
 **Contrato síncrono Atenciones → Citas:** `GET http://citas-service/api/citas/{id}`; mismos timeouts y tratamiento de errores que en §6.2. La respuesta de Citas incluye `pacienteId` y `estado`; no es necesario llamar a Pacientes.
 
-**Eventos publicados:** `atencion.registrada` (con `citaId`, `pacienteId`, `area`), `atencion.estado-cambiado`.
+**Eventos publicados:** `atencion.registrada` (con `citaId`, `pacienteId`, `area`), `atencion.finalizada`, `atencion.anulada`.
 
-**Regla de consistencia.** `atencion.registrada` es consumido por **Citas** (cola `citas.atenciones.cola`), que mueve la cita de `CONFIRMADA` a `ATENDIDA`. Es consistencia eventual: durante unos milisegundos la atención existe y la cita aún figura `CONFIRMADA`. Si el evento falla repetidamente (p. ej. la cita fue cancelada en ese intervalo), el mensaje va a la cola de errores `citas.atenciones.dlq` para revisión manual.
+**Regla de consistencia.** `atencion.registrada` y `atencion.anulada` son consumidos por **Citas** (cola `citas.atenciones.cola`): el primero mueve la cita de `CONFIRMADA` a `ATENDIDA`; el segundo la pasa a `CANCELADA` si aún no ocurrió (RN-17). Atenciones nunca modifica la cita: Citas sigue siendo el único dueño de su estado. Es consistencia eventual: durante unos milisegundos la atención existe y la cita aún figura `CONFIRMADA`. Las reglas RN-15/RN-16 impiden que la cita se cancele en ese intervalo; si un evento aun así fallara repetidamente, va a `citas.atenciones.dlq` para revisión manual.
 
 ## 5.6 `pagos-service`
 
@@ -432,7 +438,7 @@ Se incluyen para demostrar que la arquitectura los admite sin cambios estructura
 | Citas → Pacientes: ¿existe y está activo? | **Síncrona** | Sin esa respuesta no se puede aceptar ni rechazar la cita. |
 | Atenciones → Citas: ¿la cita existe y está `CONFIRMADA`? | **Síncrona** | La atención no puede registrarse sin esa respuesta. |
 | Pagos → Pacientes: ¿existe y está activo? | **Síncrona** | Un pago no se acepta sin paciente válido. |
-| Atención registrada → cita pasa a `ATENDIDA` | **Asíncrona** | Citas es dueño del estado de la cita; reacciona a un hecho publicado en vez de ser modificado por otro servicio. |
+| Atención registrada/anulada → cita pasa a `ATENDIDA`/`CANCELADA` | **Asíncrona** | Citas es dueño del estado de la cita; reacciona a un hecho publicado en vez de ser modificado por otro servicio. |
 | Cita confirmada → Notificación | **Asíncrona** | El usuario no debe esperar que se "envíe" el aviso; si Notificaciones cae, la cita igual se confirma. |
 | Cualquier cambio de estado → Auditoría | **Asíncrona** | La trazabilidad no debe bloquear ni poder hacer fallar la operación. |
 
@@ -465,6 +471,7 @@ stateDiagram-v2
     CONFIRMADA --> CANCELADA: cancelar
     CONFIRMADA --> PENDIENTE: reprogramar
     PENDIENTE --> PENDIENTE: reprogramar
+    ATENDIDA --> CANCELADA: atención anulada antes de la hora (evento)
     ATENDIDA --> [*]
     CANCELADA --> [*]
     AUSENTE --> [*]
@@ -474,9 +481,10 @@ stateDiagram-v2
 |---|---|
 | `PENDIENTE` | `CONFIRMADA`, `CANCELADA`, (reprogramar → `PENDIENTE`) |
 | `CONFIRMADA` | `ATENDIDA`, `AUSENTE`, `CANCELADA`, (reprogramar → `PENDIENTE`) |
-| `ATENDIDA`, `CANCELADA`, `AUSENTE` | Ninguna (estados finales) |
+| `ATENDIDA` | Ninguna por API; `CANCELADA` solo por el sistema si la atención se anula antes de la hora (RN-17) |
+| `CANCELADA`, `AUSENTE` | Ninguna (estados finales) |
 
-`ATENDIDA` **no** se alcanza por `PATCH`: solo cuando Atenciones publica `atencion.registrada` (un único camino, RN-05/RN-12). Cualquier otra transición responde `409` con código `TRANSICION_NO_PERMITIDA`. La validación vive en el **dominio** (un tipo con su tabla de transiciones), no en el controlador, para poder probarla de forma unitaria.
+Cancelar y reprogramar exigen además que falten más de 24 h (RN-15, `409 FUERA_DE_PLAZO`). `ATENDIDA` **no** se alcanza por `PATCH`: solo cuando Atenciones publica `atencion.registrada` (un único camino, RN-05/RN-12). Cualquier otra transición responde `409` con código `TRANSICION_NO_PERMITIDA`. La validación vive en el **dominio** (un tipo con su tabla de transiciones), no en el controlador, para poder probarla de forma unitaria.
 
 ## 6.4 Mensajería con RabbitMQ
 
@@ -486,12 +494,12 @@ stateDiagram-v2
 flowchart LR
     P1["pacientes-service"] -->|"paciente.registrado<br/>paciente.estado-cambiado"| X
     P2["citas-service"] -->|"cita.creada, cita.confirmada,<br/>cita.reprogramada, cita.cancelada,<br/>cita.atendida, cita.ausente"| X
-    P3["atenciones-service"] -->|"atencion.registrada<br/>atencion.estado-cambiado"| X
+    P3["atenciones-service"] -->|"atencion.registrada<br/>atencion.finalizada<br/>atencion.anulada"| X
     P4["pagos-service"] -->|"pago.registrado<br/>pago.anulado"| X
     X{{"hospital.eventos<br/>(topic, durable)"}}
     X -->|"paciente.registrado, cita.*<br/>atencion.registrada, pago.*"| Q1["notificaciones.cola"]
     X -->|"#"| Q2["auditoria.cola"]
-    X -->|"atencion.registrada"| Q3["citas.atenciones.cola"]
+    X -->|"atencion.registrada<br/>atencion.anulada"| Q3["citas.atenciones.cola"]
     Q1 --> N["notificaciones-service"]
     Q2 --> A["auditoria-service"]
     Q3 --> C["citas-service"]
@@ -503,10 +511,10 @@ flowchart LR
 | Elemento | Valor |
 |---|---|
 | Exchange | `hospital.eventos` — tipo `topic`, durable |
-| Routing keys | `paciente.registrado`, `paciente.estado-cambiado`, `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada`, `cita.atendida`, `cita.ausente`, `atencion.registrada`, `atencion.estado-cambiado`, `pago.registrado`, `pago.anulado` |
+| Routing keys | `paciente.registrado`, `paciente.estado-cambiado`, `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada`, `cita.atendida`, `cita.ausente`, `atencion.registrada`, `atencion.finalizada`, `atencion.anulada`, `pago.registrado`, `pago.anulado` |
 | Cola de Notificaciones | `notificaciones.cola` — bindings: `paciente.registrado`, `cita.*` (y, al final, `atencion.registrada`, `pago.*`) |
 | Cola de Auditoría | `auditoria.cola` — binding: `#` |
-| Cola de Citas | `citas.atenciones.cola` — binding: `atencion.registrada` |
+| Cola de Citas | `citas.atenciones.cola` — bindings: `atencion.registrada`, `atencion.anulada` |
 | Dead-letter | Exchange `hospital.eventos.dlx` y colas `notificaciones.dlq`, `auditoria.dlq`, `citas.atenciones.dlq` para mensajes que fallan tras reintentos |
 | Productores | `pacientes-service`, `citas-service`, `atenciones-service`, `pagos-service` |
 | Consumidores | `notificaciones-service`, `auditoria-service`, `citas-service` |
@@ -670,12 +678,15 @@ CREATE TABLE atencion (
   paciente_id          UUID        NOT NULL,   -- referencia lógica, SIN FK
   cita_id              UUID        NOT NULL,   -- referencia lógica, SIN FK
   fecha_atencion       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  area                 VARCHAR(60) NOT NULL,
+  area                 VARCHAR(20) NOT NULL
+                       CHECK (area IN ('CONSULTA_EXTERNA','EMERGENCIA','TRIAJE','PROCEDIMIENTOS')),
   estado               VARCHAR(12) NOT NULL DEFAULT 'REGISTRADA'
                        CHECK (estado IN ('REGISTRADA','FINALIZADA','ANULADA')),
   fecha_creacion       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  fecha_actualizacion  TIMESTAMPTZ NOT NULL DEFAULT now()
+  fecha_actualizacion  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  version              BIGINT      NOT NULL DEFAULT 0   -- bloqueo optimista
 );
+CREATE SEQUENCE atencion_codigo_seq;
 -- Una cita tiene como máximo una atención no anulada
 CREATE UNIQUE INDEX ux_atencion_cita_activa ON atencion (cita_id) WHERE estado <> 'ANULADA';
 CREATE INDEX ix_atencion_paciente ON atencion (paciente_id);
@@ -740,7 +751,7 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 
 ## 9.3 Catálogo de códigos de negocio
 
-`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`.
+`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `FUERA_DE_VENTANA_ATENCION`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`.
 
 ## 9.4 Ejemplos de contrato
 
@@ -773,7 +784,7 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 **`POST /api/atenciones`**
 
 ```json
-{ "citaId": "b53a…", "area": "Consulta Externa" }
+{ "citaId": "b53a…", "area": "CONSULTA_EXTERNA" }
 ```
 
 **`POST /api/pagos`**
@@ -947,6 +958,7 @@ source scripts/entorno-dev.sh        # exporta variables para los servicios
 |---|---|---|
 | Autenticación/autorización | No implementada | JWT validado en el Gateway; roles por actor |
 | Fiabilidad de eventos | Publicar tras `commit` | *Transactional Outbox* |
+| Consistencia entre servicios | Reglas de negocio que evitan la carrera atención/cancelación + DLQ | Saga con compensación |
 | Tolerancia a fallos síncronos | Timeout + 1 reintento | *Circuit breaker* (Resilience4j) |
 | Aislamiento de BD | Una instancia, una BD por servicio | Instancia por servicio |
 | Observabilidad | Logs y `actuator/health` | Trazas distribuidas (Micrometer Tracing), métricas |
@@ -1002,6 +1014,7 @@ Se hacen **commits locales pequeños y descriptivos** durante todo el proceso (e
 - [ ] Llamada síncrona Citas → Pacientes (log) y comportamiento con Pacientes detenido (`503`).
 - [ ] Panel de RabbitMQ: exchange, colas y mensaje publicado y consumido.
 - [ ] Atención registrada sobre cita confirmada, rechazo sobre cita no confirmada y cita pasando a `ATENDIDA` por evento.
+- [ ] Cancelación a menos de 24 h rechazada (`409 FUERA_DE_PLAZO`); atención a más de 30 min de la cita rechazada (`409 FUERA_DE_VENTANA_ATENCION`); atención anulada antes de la hora → cita `CANCELADA`.
 - [ ] Pago registrado, rechazo por monto ≤ 0 (`400`) y por número de operación duplicado (`409`).
 - [ ] Swagger UI de un servicio y colección Postman ejecutada.
 - [ ] Registros en las tablas `notificacion` y `evento_auditoria`.

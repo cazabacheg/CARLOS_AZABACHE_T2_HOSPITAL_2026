@@ -9,7 +9,7 @@
 Registrar la **atención administrativa simulada** de una cita confirmada y seguir su estado. No guarda historia clínica, diagnósticos ni tratamientos.
 
 * Valida la cita con una llamada **síncrona** a Citas.
-* Publica `atencion.registrada`; **Citas** reacciona y pasa la cita a `ATENDIDA` (Atenciones nunca modifica la cita directamente).
+* Publica `atencion.registrada`; **Citas** reacciona y pasa la cita a `ATENDIDA`. Si la atención se anula, publica `atencion.anulada` y Citas decide si cancela la cita. Atenciones **nunca** modifica la cita directamente.
 
 ## 2. Módulo
 
@@ -20,7 +20,7 @@ Registrar la **atención administrativa simulada** de una cita confirmada y segu
 | Paquete base | `pe.edu.cibertec.vidasalud.atenciones` |
 | Base de datos | `atenciones_db` (usuario `atenciones_user`) |
 | Dependencias | Iguales a `citas-service` (spec 03 §2) |
-| `application.yml` | Plantilla de la spec 02 §2.1 con puerto `8085`, variables `ATENCIONES_DB_*`, y `hospital.clientes.citas.url: http://citas-service` |
+| `application.yml` | Plantilla de la spec 02 §2.1 con puerto `8085`, variables `ATENCIONES_DB_*`, `hospital.clientes.citas.url: http://citas-service` y `hospital.atencion.minutos-antes: ${ATENCION_MINUTOS_ANTES:30}` |
 
 ## 3. Modelo de dominio
 
@@ -64,6 +64,9 @@ Métodos de dominio:
 | La cita debe existir | Llamada síncrona a Citas | `404 CITA_NO_ENCONTRADA` |
 | La cita debe estar `CONFIRMADA` | Servicio, con la respuesta de Citas | `409 CITA_NO_CONFIRMADA`, "Solo se registra atención para citas confirmadas (estado actual: <ESTADO>)." |
 | Una cita tiene como máximo **una** atención no anulada | Consulta previa + índice único parcial `ux_atencion_cita_activa` | `409 ATENCION_DUPLICADA`, "La cita ya tiene una atención registrada." |
+| **Ventana de atención (RN-16):** solo desde **30 minutos antes** del inicio de la cita en adelante (sin límite posterior) | Servicio, con `fechaHora` de la cita y el `Clock` | `409 FUERA_DE_VENTANA_ATENCION`, "La atención se puede registrar desde 30 minutos antes de la cita (<hora>)." |
+
+**Por qué la ventana elimina la carrera.** Citas solo permite cancelar hasta 24 h antes (RN-15, spec 03); Atenciones solo registra desde 30 min antes. Las dos ventanas **no se superponen**, así que no puede cancelarse una cita mientras se registra su atención. Los 30 minutos son configurables (`hospital.atencion.minutos-antes`).
 
 ## 4. Cliente síncrono a Citas (`client/CitasClient.java`)
 
@@ -71,7 +74,7 @@ Mismo patrón que `PacientesClient` (spec 03 §4):
 
 * `@LoadBalanced WebClient`, `baseUrl = http://citas-service`, `PoliticaResiliencia`, propagación de `X-Request-Id`.
 * `Mono<CitaResumen> obtener(UUID citaId)` → `GET /api/citas/{id}`.
-* `CitaResumen(UUID id, UUID pacienteId, String estado)` propio, tolerante a campos desconocidos.
+* `CitaResumen(UUID id, UUID pacienteId, String estado, OffsetDateTime fechaHora)` propio, tolerante a campos desconocidos.
 
 | Respuesta de Citas | Resultado |
 |---|---|
@@ -88,10 +91,11 @@ No se llama a Pacientes: la cita ya trae `pacienteId` y Citas validó al pacient
 
 1. `citasClient.obtener(citaId)` → `404` / `503` / `504`.
 2. Si `estado != CONFIRMADA` → `409 CITA_NO_CONFIRMADA`.
-3. `existsActivaByCitaId(citaId)` → `409 ATENCION_DUPLICADA`.
-4. Código con `nextval('atencion_codigo_seq')` → `ATE-<yyyyMMdd>-<NNNNNN>`.
-5. `Atencion.registrar(...)`; `save` con `onErrorMap(DuplicateKeyException → 409 ATENCION_DUPLICADA)` (dos peticiones simultáneas para la misma cita).
-6. Publicar `atencion.registrada`; devolver `201`.
+3. Si `ahora < fechaHora − 30 min` → `409 FUERA_DE_VENTANA_ATENCION`.
+4. `existsActivaByCitaId(citaId)` → `409 ATENCION_DUPLICADA`.
+5. Código con `nextval('atencion_codigo_seq')` → `ATE-<yyyyMMdd>-<NNNNNN>`.
+6. `Atencion.registrar(...)`; `save` con `onErrorMap(DuplicateKeyException → 409 ATENCION_DUPLICADA)` (dos peticiones simultáneas para la misma cita).
+7. Publicar `atencion.registrada`; devolver `201`.
 
 ### 5.2 Obtener — `404 ATENCION_NO_ENCONTRADA`.
 
@@ -100,9 +104,12 @@ No se llama a Pacientes: la cita ya trae `pacienteId` y Citas validó al pacient
 ### 5.4 Cambiar estado — `PATCH`; destinos `FINALIZADA` o `ANULADA`
 
 1. `obtener` (404); `cambiarEstado` (409); `save` (409 `CONFLICTO_CONCURRENTE` por `@Version`).
-2. Publicar `atencion.estado-cambiado`.
+2. Publicar `atencion.finalizada` o `atencion.anulada` según el destino.
 
-**Anular no revierte la cita** (D-22): la cita permanece `ATENDIDA`, que es un estado final en Citas. La anulación es una corrección administrativa que queda trazada en Auditoría. Se documenta como simplificación.
+**Efecto de anular sobre la cita** (D-22, revisado): lo decide **Citas** al consumir `atencion.anulada` (spec 03 §5.7):
+
+* Si la cita **aún no ocurrió** (`ahora < fechaHora`) → la cita pasa a `CANCELADA` (estado final; para reagendar se crea una cita nueva).
+* Si **ya ocurrió** → la cita sigue `ATENDIDA`; la anulación queda como corrección administrativa en Auditoría.
 
 ## 6. API
 
@@ -131,13 +138,16 @@ AtencionResponse(id, codigo, pacienteId, citaId, fechaAtencion, area, areaNombre
 | Routing key | Cuándo | Anterior → Nuevo | Consumidores |
 |---|---|---|---|
 | `atencion.registrada` | registrar | `null` → `REGISTRADA` | **Citas** (`citas.atenciones.cola`), Auditoría, Notificaciones (baja prioridad) |
-| `atencion.estado-cambiado` | `PATCH` | `REGISTRADA` → `FINALIZADA`/`ANULADA` (+ `datos.motivo`) | Auditoría |
+| `atencion.finalizada` | `PATCH` a `FINALIZADA` | `REGISTRADA` → `FINALIZADA` (+ `datos.motivo`) | Auditoría |
+| `atencion.anulada` | `PATCH` a `ANULADA` | `REGISTRADA` → `ANULADA` (+ `datos.motivo`) | **Citas** (`citas.atenciones.cola`), Auditoría |
+
+Se usan routing keys específicas (en vez de un genérico `atencion.estado-cambiado`) para que la cola de Citas se suscriba **solo** a lo que le afecta.
 
 Este servicio **no consume** eventos.
 
-### 7.1 Caso límite de consistencia (documentado)
+### 7.1 Consistencia entre Atenciones y Citas
 
-Si entre el paso 1 (cita `CONFIRMADA`) y el consumo del evento alguien cancela la cita, Citas rechaza la transición y el mensaje termina en `citas.atenciones.dlq`; la atención queda `REGISTRADA` sobre una cita `CANCELADA`. Es la consecuencia aceptada de la consistencia eventual. La solución completa sería una **saga con compensación** (Citas publica `cita.atencion-rechazada` y Atenciones anula la atención); queda como mejora en §14 del documento técnico.
+El caso "se cancela la cita mientras se registra su atención" queda **eliminado por regla de negocio**: cancelación hasta 24 h antes (RN-15) y atención desde 30 min antes (RN-16) son ventanas disjuntas. La DLQ `citas.atenciones.dlq` se mantiene como red de seguridad (p. ej. si alguien cambiara los parámetros configurables hasta solapar las ventanas). Una saga con compensación queda como mejora general en §14 del documento técnico.
 
 ## 8. Pruebas
 
@@ -146,7 +156,7 @@ Si entre el paso 1 (cita `CONFIRMADA`) y el consumo del evento alguien cancela l
 | `EstadoAtencionTest` | Unitaria | Matriz 3×3 de transiciones |
 | `AtencionTest` | Unitaria | `registrar` toma `pacienteId` de la cita y queda `REGISTRADA`; `FINALIZADA → ANULADA` → 409 |
 | `CitasClientTest` | `MockWebServer` | `200`; `404` → `CITA_NO_ENCONTRADA`; `500` → `503`; retraso → `504`; error de red reintenta una vez |
-| `AtencionServiceTest` | `StepVerifier` + Mockito | Registro OK publica `atencion.registrada` con `citaId` y `pacienteId`; cita `PENDIENTE` → 409 `CITA_NO_CONFIRMADA` sin guardar; cita `CANCELADA` → 409; atención existente → 409 `ATENCION_DUPLICADA`; `DuplicateKeyException` → 409; Citas caído → 503 |
+| `AtencionServiceTest` | `StepVerifier` + Mockito, `Clock` fijo | Registro OK (30 min antes exactos y 2 h después) publica `atencion.registrada` con `citaId` y `pacienteId`; 31 min antes → 409 `FUERA_DE_VENTANA_ATENCION`; cita `PENDIENTE` → 409 `CITA_NO_CONFIRMADA` sin guardar; cita `CANCELADA` → 409; atención existente → 409 `ATENCION_DUPLICADA`; `DuplicateKeyException` → 409; Citas caído → 503; anular publica `atencion.anulada`, finalizar publica `atencion.finalizada` |
 | `AtencionControllerTest` | `@WebFluxTest` | `POST` OK 201; `area` inválida → 400; `citaId` ausente → 400; `GET` inexistente → 404; `PATCH` prohibido → 409 |
 | `AtencionRepositoryIT` | PostgreSQL | Dos atenciones `REGISTRADA` misma cita → `DuplicateKeyException`; si la primera está `ANULADA` → permitido; secuencia de código |
 | `AtencionFlujoIT` | PostgreSQL + RabbitMQ + `MockWebServer` (Citas) | `POST` → mensaje `atencion.registrada` en una cola de prueba con `datos.citaId` correcto |
@@ -164,24 +174,27 @@ POST /api/atenciones
 
 - [ ] `./mvnw -pl atenciones-service -am verify` en verde.
 - [ ] `ATENCIONES-SERVICE` en Eureka; la llamada a Citas usa el nombre `citas-service`.
-- [ ] Vía Gateway, con una cita `CONFIRMADA`: `POST /api/atenciones` → `201`, y al consultar la cita ya está `ATENDIDA`.
+- [ ] Vía Gateway, con una cita `CONFIRMADA` que empieza en ≤ 30 min: `POST /api/atenciones` → `201`, y al consultar la cita ya está `ATENDIDA`.
+- [ ] Con una cita `CONFIRMADA` de mañana → `409 FUERA_DE_VENTANA_ATENCION`.
+- [ ] Anular esa atención antes de la hora de la cita → la cita pasa a `CANCELADA`.
 - [ ] Con una cita `PENDIENTE` → `409 CITA_NO_CONFIRMADA`.
 - [ ] Segunda atención para la misma cita → `409` (`ATENCION_DUPLICADA` o `CITA_NO_CONFIRMADA` si la cita ya pasó a `ATENDIDA`).
 - [ ] Con `citas-service` detenido → `503 SERVICIO_CITAS_NO_DISPONIBLE`.
 - [ ] Mensajes `atencion.registrada` y `cita.atendida` visibles en Auditoría.
 
-## 11. Ajustes que se propagan al documento técnico al aprobar
+## 11. Ajustes propagados al documento técnico (aplicados)
 
 1. §8.4: columna `version` y secuencia `atencion_codigo_seq` en `atencion`; `area` como catálogo.
-2. §5.5: área como catálogo; anular no revierte la cita; caso límite §7.1.
-3. §14: mejora "saga con compensación para atención sobre cita cancelada".
+2. §5.5: área como catálogo; ventana de 30 min; efecto de la anulación sobre la cita; eventos `atencion.finalizada`/`atencion.anulada`.
+3. §2.3: RN-15, RN-16, RN-17; §6.3 y §6.4: transición de sistema y nueva routing key.
 4. §9.4: ejemplo con `"area": "CONSULTA_EXTERNA"`.
 
-## 12. Decisiones abiertas para revisión
+## 12. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
-| D-22 | Anular una atención **no** revierte la cita (sigue `ATENDIDA`) | Revertir la cita a `CONFIRMADA` vía evento (rompe que `ATENDIDA` sea final) |
-| D-23 | `area` como catálogo cerrado de 4 valores | Texto libre |
-| D-24 | Caso "cita cancelada mientras se registra la atención" se acepta y se documenta (DLQ), sin saga de compensación | Implementar la compensación (más eventos y un consumidor en Atenciones) |
-| D-25 | Atenciones no consulta a Pacientes (confía en la validación hecha al crear la cita) | Verificar también que el paciente siga `ACTIVO` |
+| D-22 | **Aprobado (revisado):** anular una atención cancela la cita si aún no ocurrió; si ya ocurrió, la cita sigue `ATENDIDA` | No tocar la cita / devolverla a `CONFIRMADA` |
+| D-23 | **Aprobado:** `area` como catálogo cerrado de 4 valores | Texto libre |
+| D-24 | **Aprobado (revisado):** la carrera se elimina por reglas (24 h para cancelar, 30 min para atender); DLQ como red de seguridad | Saga con compensación |
+| D-25 | **Aprobado:** Atenciones no consulta a Pacientes | Verificar también que el paciente siga `ACTIVO` |
+| D-29 | **Aprobado:** atención desde 30 min antes de la cita, sin límite posterior (configurable) | Solo el mismo día de la cita |
