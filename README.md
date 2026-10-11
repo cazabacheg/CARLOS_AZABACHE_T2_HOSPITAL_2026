@@ -74,6 +74,19 @@ scripts/detener-todo.sh
 docker compose -f infra/docker-compose.yml down        # añadir -v para borrar los datos
 ```
 
+### Alternativa: todo en contenedores (un solo comando)
+
+```bash
+scripts/preparar-entorno.sh
+docker compose -f infra/docker-compose.yml --profile apps up -d --build
+# detener: docker compose -f infra/docker-compose.yml --profile apps down
+```
+
+El perfil `apps` construye una imagen por servicio a partir del `Dockerfile` de la raíz (multi-etapa, argumento
+`MODULE`, usuario sin privilegios, agente OpenTelemetry con hash verificado y *healthcheck*) y los arranca en el orden
+correcto (Eureka → resto). Los puertos son los mismos; **detenga antes los procesos del host**
+(`scripts/detener-todo.sh`). Sin el perfil, `docker compose up` levanta solo la infraestructura.
+
 | Panel | URL |
 |---|---|
 | Eureka (servicios registrados) | http://localhost:8761 |

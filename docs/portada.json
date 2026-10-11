@@ -1,0 +1,11 @@
+{
+  "alumno": "Carlos Adrián Azabache Obregón",
+  "codigo": "i202016694",
+  "titulo": "T2 - Desarrollo de Aplicaciones Web II",
+  "subtitulo": "Segunda evaluación · Caso de estudio: Hospital Vida Salud",
+  "descripcion": "Arquitectura de microservicios con Spring Cloud, RabbitMQ y R2DBC",
+  "curso": "4698 Desarrollo de Aplicaciones Web II",
+  "profesor": "Zambrano Macedo, Yuri Renzo",
+  "semestre": "2026",
+  "fecha": "Octubre de 2026"
+}

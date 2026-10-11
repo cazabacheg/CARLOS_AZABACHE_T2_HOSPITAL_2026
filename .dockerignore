@@ -1,0 +1,11 @@
+**/target/
+.git/
+.github/
+logs/
+tools/
+docs/
+infra/
+scripts/
+node_modules/
+*.bundle
+*.md

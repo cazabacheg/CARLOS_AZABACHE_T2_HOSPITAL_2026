@@ -1,4 +1,31 @@
 name: hospital-vida-salud
+
+# Aplicaciones (perfil "apps"): docker compose --profile apps up -d --build
+# Sin el perfil solo se levanta la infraestructura y los servicios se ejecutan en el host
+# (scripts/iniciar-todo.sh).
+x-app: &app
+  restart: unless-stopped
+  profiles: ["apps"]
+  build: &app-build
+    context: ..
+    dockerfile: Dockerfile
+x-app-env: &app-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  RABBIT_HOST: rabbitmq
+  RABBIT_PORT: "5672"
+  RABBIT_USER: ${RABBIT_USER}
+  RABBIT_PASSWORD: ${RABBIT_PASSWORD}
+  EUREKA_URL: http://eureka-server:8761/eureka
+  OTEL_RESOURCE_ATTRIBUTES: service.namespace=hospital-vida-salud,deployment.environment=docker
+  OTEL_PROPAGATORS: tracecontext,baggage
+  OTEL_TRACES_SAMPLER: always_on
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+  OTEL_LOGS_EXPORTER: otlp
+  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://seq:5341/ingest/otlp/v1/logs
+  OTEL_METRICS_EXPORTER: none
 services:
   postgres:
     image: postgres:16
@@ -63,6 +90,222 @@ services:
       - "127.0.0.1:5341:5341"
     volumes:
       - hvs-seqdata:/data
+
+  # ---- Aplicaciones (perfil apps) ----
+  eureka-server:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: eureka-server
+    image: hvs/eureka-server:latest
+    container_name: hvs-eureka-server
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: eureka-server
+    ports:
+      - "127.0.0.1:8761:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8761/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  api-gateway:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: api-gateway
+    image: hvs/api-gateway:latest
+    container_name: hvs-api-gateway
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: api-gateway
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  pacientes-service:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: pacientes-service
+    image: hvs/pacientes-service:latest
+    container_name: hvs-pacientes-service
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: pacientes-service
+      PACIENTES_DB_PASSWORD: ${PACIENTES_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8081/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  citas-service:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: citas-service
+    image: hvs/citas-service:latest
+    container_name: hvs-citas-service
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: citas-service
+      CITAS_DB_PASSWORD: ${CITAS_DB_PASSWORD}
+      AGENDA_DIAS_ATENCION: "${AGENDA_DIAS_ATENCION:-MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY}"
+      AGENDA_HORA_INICIO: "${AGENDA_HORA_INICIO:-08:00}"
+      AGENDA_HORA_ULTIMO_INICIO: "${AGENDA_HORA_ULTIMO_INICIO:-17:30}"
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8082/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  atenciones-service:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: atenciones-service
+    image: hvs/atenciones-service:latest
+    container_name: hvs-atenciones-service
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: atenciones-service
+      ATENCIONES_DB_PASSWORD: ${ATENCIONES_DB_PASSWORD}
+      ATENCION_MINUTOS_ANTES: "${ATENCION_MINUTOS_ANTES:-30}"
+    ports:
+      - "127.0.0.1:8085:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8085/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  pagos-service:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: pagos-service
+    image: hvs/pagos-service:latest
+    container_name: hvs-pagos-service
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: pagos-service
+      PAGOS_DB_PASSWORD: ${PAGOS_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:8086:8086"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8086/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  notificaciones-service:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: notificaciones-service
+    image: hvs/notificaciones-service:latest
+    container_name: hvs-notificaciones-service
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: notificaciones-service
+      NOTIFICACIONES_DB_PASSWORD: ${NOTIFICACIONES_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8083/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  auditoria-service:
+    <<: *app
+    build:
+      <<: *app-build
+      args:
+        MODULE: auditoria-service
+    image: hvs/auditoria-service:latest
+    container_name: hvs-auditoria-service
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: auditoria-service
+      AUDITORIA_DB_PASSWORD: ${AUDITORIA_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8084/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
 volumes:
   hvs-pgdata:
