@@ -1,5 +1,6 @@
 #!/bin/bash
 # Arranca Eureka, Gateway y los servicios en orden, esperando la salud de cada uno.
+# Uso: scripts/iniciar-todo.sh [servicio ...]   (sin argumentos arranca todos)
 # Requisitos: infraestructura arriba (docker compose), proyecto empaquetado
 # (./mvnw -DskipTests package) e infra/.env creado (scripts/preparar-entorno.sh).
 set -euo pipefail
@@ -14,6 +15,16 @@ servicios=(
   "eureka-server:8761" "api-gateway:8080" "pacientes-service:8081" "citas-service:8082"
   "atenciones-service:8085" "pagos-service:8086" "notificaciones-service:8083" "auditoria-service:8084"
 )
+
+if [ "$#" -gt 0 ]; then
+  seleccion=()
+  for entrada in "${servicios[@]}"; do
+    for pedido in "$@"; do
+      [ "${entrada%%:*}" = "${pedido}" ] && seleccion+=("${entrada}")
+    done
+  done
+  servicios=("${seleccion[@]}")
+fi
 
 opciones_agente=()
 if [ -f "${agente}" ]; then
