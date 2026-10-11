@@ -192,18 +192,18 @@ PATCH /api/pagos/{id}/anular
 - [ ] Anular → `200`; anular otra vez → `409 PAGO_YA_ANULADO`.
 - [ ] Fila en `pagos_db.pago` y mensaje `pago.registrado` en RabbitMQ.
 
-## 11. Ajustes que se propagan al documento técnico al aprobar
+## 11. Ajustes propagados al documento técnico (aplicados)
 
 1. §8.4: columnas `moneda`, `motivo_anulacion`, `fecha_actualizacion`, `version`; `CHECK` con máximo; índice por fecha.
 2. §5.6: endpoint de anulación con motivo obligatorio; número de operación generado por secuencia; `citaId` en lugar de `atencionId`; tope de monto; limitación de reintentos.
 4. §14: mejoras `Idempotency-Key` y "exigir pago para confirmar la cita".
 3. §9.3: (los códigos ya están: `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_NO_ENCONTRADO`, `PAGO_YA_ANULADO`).
 
-## 12. Decisiones abiertas para revisión
+## 12. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
 | D-30 | **Aprobado (revisado):** el pago referencia opcionalmente a la **cita** (`citaId`), sin validarla, porque se paga antes de la atención para consolidar la reserva. Confirmar una cita **no** exige pago (mejora futura) | Validar la cita / exigir pago para confirmar |
-| D-31 | Anular no tiene plazo; requiere motivo | Permitir anular solo el mismo día |
+| D-31 | **Aprobado:** Anular no tiene plazo; requiere motivo | Permitir anular solo el mismo día |
 | D-32 | **Aprobado (revisado):** número de operación generado por secuencia (`OP-yyyyMMdd-NNNNNN`); reintentos duplicados del cliente documentados como limitación | Número enviado por el cliente |
 | D-33 | **Aprobado:** moneda única `PEN` y monto máximo 100 000.00 | Multimoneda / sin tope |

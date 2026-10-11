@@ -372,16 +372,22 @@ Registro administrativo de la atención simulada; no guarda historia clínica.
 
 Versión reducida del Proceso 7: un único concepto de **pago** con su concepto de cobro; no se modelan cargos separados.
 
-**Entidad `pago`**: `id` (UUID), `numero_operacion` (único), `paciente_id`, `atencion_id` (opcional), `concepto`, `monto` (`NUMERIC(12,2)`, > 0), `fecha_pago`, `medio_pago` (`EFECTIVO`, `TARJETA`, `TRANSFERENCIA`, `BILLETERA`), `estado` (`REGISTRADO`, `ANULADO`).
+**Entidad `pago`**: `id` (UUID), `numero_operacion` (único, **generado** por secuencia con formato `OP-yyyyMMdd-NNNNNN`), `paciente_id`, `cita_id` (opcional, informativo), `concepto`, `monto` (`NUMERIC(12,2)`, > 0 y ≤ 100 000.00), `moneda` (solo `PEN`), `fecha_pago`, `medio_pago` (`EFECTIVO`, `TARJETA`, `TRANSFERENCIA`, `BILLETERA`), `estado` (`REGISTRADO`, `ANULADO`), `motivo_anulacion`, `fecha_actualizacion`, `version`.
+
+**Decisiones de diseño:**
+
+* El pago se registra normalmente **antes** de la atención, para consolidar la reserva; por eso referencia opcionalmente a la **cita** (`cita_id`), sin validarla. Confirmar una cita **no** exige pago (evita acoplar Citas con Pagos; mejora futura).
+* El número de operación lo genera el servicio; la restricción `UNIQUE` garantiza que no se duplique. Un pago anulado conserva su número.
+* La anulación requiere motivo y no tiene plazo.
 
 **Endpoints**
 
 | Método y ruta | Resultado | Errores |
 |---|---|---|
-| `POST /api/pagos` | `201` pago `REGISTRADO` | `400` `MONTO_INVALIDO` (≤ 0) u otros campos; `404` paciente inexistente; `422` paciente inactivo; `409` `OPERACION_DUPLICADA`; `503`/`504` Pacientes no disponible |
+| `POST /api/pagos` | `201` pago `REGISTRADO` con su `numeroOperacion` generado | `400` `MONTO_INVALIDO` (≤ 0, > 2 decimales o > 100 000.00) u otros campos; `404` paciente inexistente; `422` paciente inactivo; `503`/`504` Pacientes no disponible |
 | `GET /api/pagos/{id}` | `200` | `404` |
-| `GET /api/pagos?pacienteId=&estado=` | `200` `Flux` | — |
-| `PATCH /api/pagos/{id}/anular` | `200` | `404`, `409` ya anulado |
+| `GET /api/pagos?pacienteId=&citaId=&numeroOperacion=&estado=&medioPago=&fecha=` | `200` `Flux` paginado | — |
+| `PATCH /api/pagos/{id}/anular` `{ "motivo" }` | `200` | `400` sin motivo, `404`, `409` ya anulado o modificación concurrente |
 
 **Contrato síncrono Pagos → Pacientes:** igual al de §6.2.
 
@@ -696,14 +702,20 @@ CREATE TABLE pago (
   id                UUID PRIMARY KEY,
   numero_operacion  VARCHAR(30)   NOT NULL UNIQUE,
   paciente_id       UUID          NOT NULL,   -- referencia lógica, SIN FK
-  atencion_id       UUID,                     -- referencia lógica opcional
+  cita_id           UUID,                     -- referencia lógica opcional, informativa
   concepto          VARCHAR(120)  NOT NULL,
-  monto             NUMERIC(12,2) NOT NULL CHECK (monto > 0),
+  monto             NUMERIC(12,2) NOT NULL CHECK (monto > 0 AND monto <= 100000),
+  moneda            CHAR(3)       NOT NULL DEFAULT 'PEN' CHECK (moneda = 'PEN'),
   fecha_pago        TIMESTAMPTZ   NOT NULL DEFAULT now(),
   medio_pago        VARCHAR(15)   NOT NULL CHECK (medio_pago IN ('EFECTIVO','TARJETA','TRANSFERENCIA','BILLETERA')),
-  estado            VARCHAR(10)   NOT NULL DEFAULT 'REGISTRADO' CHECK (estado IN ('REGISTRADO','ANULADO'))
+  estado            VARCHAR(10)   NOT NULL DEFAULT 'REGISTRADO' CHECK (estado IN ('REGISTRADO','ANULADO')),
+  motivo_anulacion  VARCHAR(200),
+  fecha_actualizacion TIMESTAMPTZ NOT NULL DEFAULT now(),
+  version           BIGINT        NOT NULL DEFAULT 0   -- bloqueo optimista
 );
+CREATE SEQUENCE pago_operacion_seq;   -- número de operación OP-yyyyMMdd-NNNNNN
 CREATE INDEX ix_pago_paciente ON pago (paciente_id);
+CREATE INDEX ix_pago_fecha ON pago (fecha_pago);
 ```
 
 Las restricciones `CHECK (monto > 0)` y `UNIQUE (numero_operacion)` son la última línea de defensa de RN-09; la validación en código mejora el mensaje de error.
@@ -717,7 +729,7 @@ Las restricciones `CHECK (monto > 0)` y `UNIQUE (numero_operacion)` son la últi
 | `notificaciones_db` | notificaciones-service | `paciente_id` (copiado del evento) |
 | `auditoria_db` | auditoria-service | `recurso_id` (copiado del evento) |
 | `atenciones_db` | atenciones-service | `cita_id` → Citas, `paciente_id` (copiado de la cita) |
-| `pagos_db` | pagos-service | `paciente_id` → Pacientes (por API), `atencion_id` (opcional) |
+| `pagos_db` | pagos-service | `paciente_id` → Pacientes (por API), `cita_id` (opcional, informativo) |
 
 # 9. Contratos y manejo de errores
 
@@ -792,13 +804,14 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 ```json
 {
   "pacienteId": "9f2d…",
-  "atencionId": "c71e…",
-  "concepto": "Consulta de Medicina General",
+  "citaId": "b53a…",
+  "concepto": "Reserva de cita - Medicina General",
   "monto": 80.00,
-  "medioPago": "TARJETA",
-  "numeroOperacion": "OP-TEST-000001"
+  "medioPago": "TARJETA"
 }
 ```
+
+Respuesta `201`: el pago con `"numeroOperacion": "OP-20261012-000001"` generado por el servicio.
 
 # 10. Estrategia de pruebas
 
@@ -969,6 +982,8 @@ source scripts/entorno-dev.sh        # exporta variables para los servicios
 | Servicios restantes (Laboratorio, Hospitalización, Farmacia) | Diseñados en §5.8 | Implementarlos con el mismo patrón |
 | Swagger agregado | Una UI por servicio | Agregación de especificaciones en el Gateway |
 | Cargos de facturación | Solo pagos con concepto | Entidad `cargo` separada |
+| Reintentos de `POST /api/pagos` | Un reenvío del cliente (p. ej. tras un timeout) registra dos pagos, porque el número lo genera el servidor | Cabecera `Idempotency-Key` guardada con el pago |
+| Pago y reserva | Confirmar una cita no exige pago | Regla "cita pagada para confirmar" vía consulta o evento de Pagos |
 | Despliegue | Docker Compose local | Imágenes en un registro y despliegue automatizado |
 
 # 15. Plan de implementación y trazabilidad con la rúbrica
