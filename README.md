@@ -110,10 +110,15 @@ correcto (Eureka → resto). Los puertos son los mismos; **detenga antes los pro
   `hospital-vida-salud.postman_environment.json` (`baseUrl = http://localhost:8080`); ejecutar las carpetas en orden.
 * **curl:** ver [`docs/ejemplos-curl.md`](docs/ejemplos-curl.md).
 
+## Flujo de ramas
+
+`feature/*` → `dev` → `stage` → `main`. Las tres ramas están protegidas: los cambios solo entran por *pull request*
+con el check `build-test` en verde (sin *push* directo, ni siquiera para el dueño). Detalle en el documento técnico, §11.
+
 ## Integración continua
 
 `.github/workflows/ci.yml` compila y prueba todos los módulos (`./mvnw verify`) en cada *push* y *pull request*
-a `main`. Si la compilación o una prueba falla, el job queda en rojo y el cambio no debe integrarse.
+a `main`, `stage` y `dev`. Si la compilación o una prueba falla, el job queda en rojo y el cambio no debe integrarse.
 
 ## Seguridad y datos
 

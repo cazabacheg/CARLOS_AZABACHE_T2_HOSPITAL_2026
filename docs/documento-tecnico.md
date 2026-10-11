@@ -950,6 +950,20 @@ jobs:
 * **Caché de Maven** con `cache: maven` para acelerar ejecuciones.
 * **Separación CI/CD.** La construcción de imágenes Docker, si se hace, irá en un workflow aparte, protegido por secretos (enunciado §25.5).
 
+## 11.2.1 Ramas y políticas de rama
+
+Flujo de integración: `feature/*` → `dev` → `stage` → `main`.
+
+| Rama | Propósito | Política (aplicada también al dueño del repositorio) |
+|---|---|---|
+| `dev` | Integración continua del trabajo diario | Solo por *pull request*; el check `build-test` debe estar en verde y actualizado |
+| `stage` | Validación previa a producción | Igual que `dev` |
+| `main` | Versión estable | Igual que `dev`; sin *push* directo, sin *force-push* ni borrado |
+
+* El workflow se ejecuta en cada *push* y *pull request* de las tres ramas (`on: push/pull_request` sobre `main`, `stage` y `dev`).
+* Los *merges* son con commit de integración (sin *squash*), para conservar el historial de commits pequeños.
+* Evidencia: un *push* directo a `main` es rechazado por GitHub (`GH006: Protected branch update failed... Changes must be made through a pull request`), ver `docs/evidencias/push-directo-rechazado.txt`.
+
 ## 11.3 Qué ocurre cuando algo falla
 
 1. `./mvnw verify` retorna código distinto de cero si falla la compilación o una prueba.
