@@ -245,12 +245,12 @@ Duplicado: mismo cuerpo dos veces → segunda respuesta `409 PACIENTE_DUPLICADO`
 - [ ] Swagger en `http://localhost:8081/swagger-ui.html`.
 - [ ] Ningún log contiene documento, nombres, teléfono o correo.
 
-## 10. Decisiones abiertas para revisión
+## 10. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
-| D-11 | El documento (tipo + número) es **inmutable** por `PUT`; para corregirlo se inactiva y se registra de nuevo | Permitir cambiarlo, con la misma validación de duplicado |
-| D-12 | Sin `DELETE`; la baja es `INACTIVO` | `DELETE` físico (rompería referencias en citas y pagos) |
-| D-13 | Los eventos no llevan datos personales (solo ids y estados) | Incluir nombre y correo para notificaciones "reales" |
-| D-14 | Actualizar datos de contacto **no** publica evento | Publicar `paciente.actualizado` para auditoría |
-| D-15 | Inactivar a un paciente no cancela sus citas existentes | Cancelarlas automáticamente vía evento consumido por Citas |
+| D-11 | **Aprobado:** El documento (tipo + número) es **inmutable** por `PUT`; para corregirlo se inactiva y se registra de nuevo | Permitir cambiarlo, con la misma validación de duplicado |
+| D-12 | **Aprobado:** Sin `DELETE`; la baja es `INACTIVO` | `DELETE` físico (rompería referencias en citas y pagos) |
+| D-13 | **Aprobado:** Los eventos no llevan datos personales (solo ids y estados) | Incluir nombre y correo para notificaciones "reales" |
+| D-14 | **Aprobado:** Actualizar datos de contacto **no** publica evento | Publicar `paciente.actualizado` para auditoría |
+| D-15 | **Aprobado:** Inactivar a un paciente no cancela sus citas existentes | Cancelarlas automáticamente vía evento consumido por Citas |

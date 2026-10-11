@@ -147,6 +147,7 @@ management:
         include: health,info
 ```
 
+* Eureka es el mecanismo **real** de descubrimiento de la solución (no un simulacro): el Gateway y todos los clientes resuelven instancias por nombre a través de él. Lo único "de demostración" son estos dos ajustes de tiempos.
 * `enable-self-preservation: false` y la evicción cada 5 s hacen que, en la demostración, una instancia detenida desaparezca del registro rápido. Se documenta que en producción se deja activado.
 * **Panel:** `http://localhost:8761` = evidencia de rúbrica.
 
