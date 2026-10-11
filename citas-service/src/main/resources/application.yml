@@ -1,0 +1,44 @@
+server:
+  port: 8082
+spring:
+  application:
+    name: citas-service
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${CITAS_DB_NAME:citas_db}
+    username: ${CITAS_DB_USER:citas_user}
+    password: ${CITAS_DB_PASSWORD}
+  sql:
+    init:
+      mode: always
+hospital:
+  rabbit:
+    host: ${RABBIT_HOST:localhost}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:hospital}
+    password: ${RABBIT_PASSWORD}
+  clientes:
+    pacientes:
+      url: http://pacientes-service
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 10
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{trace_id:-},%X{span_id:-}]"
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
