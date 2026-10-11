@@ -10,6 +10,7 @@ spring:
   sql:
     init:
       mode: always
+      separator: "@@"
 hospital:
   rabbit:
     host: ${RABBIT_HOST:localhost}

@@ -1,0 +1,9 @@
+spring:
+  r2dbc:
+    password: test
+hospital:
+  rabbit:
+    password: test
+eureka:
+  client:
+    enabled: false
