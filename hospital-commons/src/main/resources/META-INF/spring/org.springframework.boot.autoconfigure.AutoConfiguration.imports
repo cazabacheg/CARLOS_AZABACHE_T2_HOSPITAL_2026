@@ -1,0 +1,4 @@
+pe.edu.cibertec.vidasalud.commons.reloj.RelojAutoConfiguration
+pe.edu.cibertec.vidasalud.commons.error.ErroresAutoConfiguration
+pe.edu.cibertec.vidasalud.commons.observabilidad.ObservabilidadAutoConfiguration
+pe.edu.cibertec.vidasalud.commons.messaging.RabbitAutoConfiguration

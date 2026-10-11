@@ -1,0 +1,66 @@
+name: hospital-vida-salud
+services:
+  postgres:
+    image: postgres:16
+    container_name: hvs-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      PACIENTES_DB_PASSWORD: ${PACIENTES_DB_PASSWORD}
+      CITAS_DB_PASSWORD: ${CITAS_DB_PASSWORD}
+      ATENCIONES_DB_PASSWORD: ${ATENCIONES_DB_PASSWORD}
+      PAGOS_DB_PASSWORD: ${PAGOS_DB_PASSWORD}
+      NOTIFICACIONES_DB_PASSWORD: ${NOTIFICACIONES_DB_PASSWORD}
+      AUDITORIA_DB_PASSWORD: ${AUDITORIA_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - hvs-pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: hvs-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - hvs-rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Observabilidad (spec 08)
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    container_name: hvs-jaeger
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+
+  seq:
+    image: datalust/seq:2026.1.17114
+    container_name: hvs-seq
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:8090:80"
+      - "127.0.0.1:5341:5341"
+    volumes:
+      - hvs-seqdata:/data
+
+volumes:
+  hvs-pgdata:
+  hvs-rabbitdata:
+  hvs-seqdata:
