@@ -45,7 +45,8 @@ Spring Data R2DBC + PostgreSQL 16, RabbitMQ 3.13 (`reactor-rabbitmq`), OpenTelem
 Testcontainers, Maven Wrapper, GitHub Actions.
 
 La documentación completa de diseño está en [`docs/documento-tecnico.md`](docs/documento-tecnico.md)
-y las especificaciones por servicio en [`docs/specs/`](docs/specs/).
+las especificaciones por servicio en [`docs/specs/`](docs/specs/), la guía de sustentación en
+[`docs/guia-sustentacion.md`](docs/guia-sustentacion.md) y las evidencias en [`docs/evidencias/`](docs/evidencias/).
 
 ## Requisitos
 
@@ -66,6 +67,7 @@ docker compose -f infra/docker-compose.yml up -d
 # 3. Agente OpenTelemetry (trazas y logs) y arranque de todos los servicios
 scripts/descargar-otel-agent.sh
 scripts/iniciar-todo.sh                  # Eureka -> Gateway -> servicios (logs en logs/)
+                                         # (o solo algunos: scripts/iniciar-todo.sh eureka-server api-gateway pacientes-service)
 
 # Detener
 scripts/detener-todo.sh
@@ -77,7 +79,7 @@ docker compose -f infra/docker-compose.yml down        # añadir -v para borrar 
 | Eureka (servicios registrados) | http://localhost:8761 |
 | RabbitMQ (exchange `hospital.eventos`, colas) | http://localhost:15672 (usuario/clave en `infra/.env`) |
 | Jaeger (trazas) | http://localhost:16686 |
-| Seq (logs) | http://localhost:8090 (usuario `admin`, clave `SEQ_ADMIN_PASSWORD` de `infra/.env`) |
+| Seq (logs) | http://localhost:8090 (usuario `admin`, clave inicial `SEQ_ADMIN_PASSWORD` de `infra/.env`; Seq pide cambiarla en el primer acceso) |
 | Swagger de cada servicio | `http://localhost:808x/swagger-ui.html` |
 | Rutas del Gateway | http://localhost:8080/actuator/gateway/routes |
 
