@@ -75,7 +75,7 @@ Reglas:
 | Zona horaria | `America/Lima`; un bean `Clock` (`Clock.system(ZoneId.of("America/Lima"))`) se inyecta en todo lo que necesite la hora, para poder fijarlo en pruebas |
 | Fechas en entidades | `OffsetDateTime` para `TIMESTAMPTZ`, `LocalDate` para `DATE` |
 | `201 Created` | Incluye cabecera `Location: /api/<recurso>/{id}` y el recurso en el cuerpo |
-| Listados | Devuelven `Flux<DTO>` (arreglo JSON). Sin paginación (se documenta como límite académico), tope de seguridad `LIMIT 200` |
+| Listados | Devuelven `Flux<DTO>` (arreglo JSON) **paginado** (§4.2) |
 | Filtros | Parámetros de consulta opcionales; si no se envían, no filtran |
 | Códigos de estado | Los del documento §9.2 |
 | Swagger | `springdoc` en cada servicio; `@Operation` solo en los endpoints principales, sin llenar de anotaciones |
@@ -102,6 +102,14 @@ Para errores de validación (`400`, `codigo = VALIDACION_FALLIDA`) se añade `er
 { "...": "...", "errores": [ { "campo": "correo", "mensaje": "debe ser un correo válido" } ] }
 ```
 
+### 4.2 Paginación
+
+* Parámetros de consulta: `pagina` (entero ≥ 0, por defecto `0`) y `tamano` (1–100, por defecto `20`). Valores fuera de rango → `400 VALIDACION_FALLIDA`.
+* La respuesta sigue siendo un arreglo JSON (`Flux<DTO>`); el total de registros que cumplen el filtro va en la cabecera **`X-Total-Count`**. Para devolver cabecera y `Flux` a la vez, el controlador devuelve `Mono<ResponseEntity<Flux<DTO>>>` armado así: se calcula `count` con el mismo criterio y se construye la `ResponseEntity` con el `Flux` de la página.
+* Cada listado define un **orden estable** (p. ej. citas por `fecha_hora, id`) para que las páginas no se mezclen.
+* Implementación: filtros opcionales con `R2dbcEntityTemplate` y `Criteria` (agrega cada condición solo si el parámetro llegó), `Query.with(PageRequest.of(pagina, tamano, sort))`; el total con `template.count(Query, Entidad.class)`.
+* `hospital-commons` aporta `ParametrosPagina` (`record` con validación y conversión a `Pageable`) y una función `respuestaPaginada(Flux<T>, Mono<Long>)` que arma la `ResponseEntity`.
+
 ## 5. Módulo `hospital-commons`
 
 Contenido **exacto** (nada más):
@@ -112,6 +120,7 @@ Contenido **exacto** (nada más):
 |---|---|
 | `ErrorNegocio extends RuntimeException` | Campos: `HttpStatus status`, `String codigo`, `String detalle`. Constructor `(HttpStatus, String codigo, String detalle)`. Es la **única** excepción que usan los servicios para errores esperados. Sin `printStackTrace` ni stack trace en la respuesta |
 | `ManejadorErrores` | `@RestControllerAdvice` que traduce: `ErrorNegocio` → `ProblemDetail` con su estado y código; `WebExchangeBindException` (validación del cuerpo) → `400 VALIDACION_FALLIDA` con `errores`; `ServerWebInputException` (JSON ilegible, parámetro inválido) → `400 VALIDACION_FALLIDA`; `DuplicateKeyException` **no** se maneja aquí (cada servicio la traduce a su código concreto); cualquier otra `Throwable` → `500 ERROR_INTERNO` con detalle genérico y registro del error en el log |
+| `ParametrosPagina`, `RespuestaPaginada` | Utilidades de §4.2 |
 | `ErroresAutoConfiguration` | Registrada en `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`; solo se activa en aplicaciones web reactivas (`@ConditionalOnWebApplication(type = REACTIVE)`) |
 
 ### 5.2 Mensajería (reactor-rabbitmq)
@@ -212,12 +221,12 @@ Definido en el documento §11. Esta spec añade:
 - [ ] `PoliticaResiliencia` pasa pruebas de: éxito, timeout (≥ 2 s), reintento solo en error de red.
 - [ ] `docker compose up` deja ambos servicios *healthy* y las 6 bases creadas, con aislamiento entre usuarios.
 
-## 13. Decisiones abiertas para revisión
+## 13. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
-| D-1 | `reactor-rabbitmq` (100 % reactivo, sin `.block()` en consumidores) | `spring-boot-starter-amqp` + `@RabbitListener`: más simple pero obliga a bloquear en el consumidor |
-| D-2 | Módulo `hospital-commons` con infraestructura técnica compartida | Duplicar el código en cada servicio: sin dependencia, pero 6 copias |
-| D-3 | Si falla la publicación del evento, la operación HTTP **no** falla (se registra el error) | Fallar la operación: más consistente, pero la cita no se confirmaría por una caída de RabbitMQ |
-| D-4 | Boot 3.5.16 / Cloud 2025.0.3 | Boot 4.1 / Cloud 2025.1.x |
-| D-5 | Sin paginación en listados (tope 200) | Paginación con `limit`/`offset` |
+| D-1 | **Aprobado:** `reactor-rabbitmq` (100 % reactivo, sin `.block()` en consumidores) | `spring-boot-starter-amqp` + `@RabbitListener`: más simple pero obliga a bloquear en el consumidor |
+| D-2 | **Aprobado:** módulo `hospital-commons` con infraestructura técnica compartida | Duplicar el código en cada servicio: sin dependencia, pero 6 copias |
+| D-3 | **Aprobado:** si falla la publicación del evento, la operación HTTP **no** falla (se registra el error) | Fallar la operación: más consistente, pero la cita no se confirmaría por una caída de RabbitMQ |
+| D-4 | **Aprobado:** Boot 3.5.16 / Cloud 2025.0.3 | Boot 4.1 / Cloud 2025.1.x |
+| D-5 | **Aprobado:** paginación `pagina`/`tamano` con `X-Total-Count` | — |

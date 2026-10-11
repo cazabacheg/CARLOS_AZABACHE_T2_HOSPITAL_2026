@@ -311,6 +311,8 @@ sequenceDiagram
 | `PUT /api/pacientes/{id}` | `200` paciente actualizado | `400`, `404`, `409` |
 | `PATCH /api/pacientes/{id}/estado` | `200` | `400`, `404` |
 
+Los listados (`GET` de colecciones) aceptan `pagina` y `tamano` y devuelven el total en la cabecera `X-Total-Count` (ver spec 00 §4.2).
+
 **Eventos publicados:** `paciente.registrado`, `paciente.estado-cambiado`.
 
 ## 5.4 `citas-service`
@@ -532,7 +534,7 @@ El `datos` lleva todo lo que los consumidores necesitan, así **no tienen que ll
 
 * El productor publica un hecho ("la cita fue confirmada") al *exchange*; **no conoce** quién lo consume, cuántos son ni si están activos.
 * Agregar un nuevo consumidor (p. ej. un servicio de reportes) solo requiere una cola nueva con su *binding*; no cambia el emisor.
-* Los servicios no comparten clases: el contrato es el JSON del evento.
+* Los servicios no comparten clases de dominio ni DTO de eventos: el contrato es el JSON del evento. Solo comparten un módulo técnico, `hospital-commons` (cliente de RabbitMQ, sobre genérico del evento, manejo de errores), sin lógica de negocio.
 * Si Notificaciones está caído, los mensajes se acumulan en la cola durable y se procesan al volver.
 
 **Publicación fiable (decisión pragmática).** Se publica el evento *después* de confirmar la escritura en BD. Hay un caso límite: si el servicio muere entre el `commit` y la publicación, el evento se pierde. El patrón *Transactional Outbox* lo resuelve, pero queda **fuera de alcance**; se documenta como mejora (§14).
@@ -816,6 +818,7 @@ Monorepo Maven multi-módulo, con `pom.xml` padre en la raíz y Maven Wrapper (`
 hospital-vida-salud/
 ├── pom.xml                       # padre: versiones y módulos
 ├── mvnw, .mvn/
+├── hospital-commons/             # librería técnica compartida (no es un servicio)
 ├── eureka-server/
 ├── api-gateway/
 ├── pacientes-service/
@@ -868,7 +871,7 @@ jobs:
 
 **Decisiones**
 
-* **Un solo job para todos los módulos.** El `pom.xml` padre compila y prueba los ocho módulos en un comando, con orden de reactor automático. Es lo más simple y suficiente; un *matrix* por módulo sería excesivo.
+* **Un solo job para todos los módulos.** El `pom.xml` padre compila y prueba los nueve módulos (incluye `hospital-commons`) en un comando, con orden de reactor automático. Es lo más simple y suficiente; un *matrix* por módulo sería excesivo.
 * **Testcontainers** funciona en `ubuntu-latest` (Docker incluido), por lo que PostgreSQL y RabbitMQ para las pruebas de integración no requieren configuración extra en el YAML.
 * **Sin secretos.** Las pruebas usan credenciales efímeras de contenedores de prueba. Nada sensible en el YAML.
 * **Caché de Maven** con `cache: maven` para acelerar ejecuciones.
