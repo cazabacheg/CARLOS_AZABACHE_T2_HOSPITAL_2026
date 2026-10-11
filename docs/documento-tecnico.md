@@ -1028,6 +1028,7 @@ scripts/descargar-otel-agent.sh      # agente OpenTelemetry (trazas y logs)
 | Servicios restantes (Laboratorio, Hospitalización, Farmacia) | Diseñados en §5.8 | Implementarlos con el mismo patrón |
 | Swagger agregado | Una UI por servicio | Agregación de especificaciones en el Gateway |
 | Cargos de facturación | Solo pagos con concepto | Entidad `cargo` separada |
+| Pipeline y Dockerfile compartidos | Un solo workflow y un `Dockerfile` parametrizado para los 8 módulos del monorepo (el enunciado §25.4 admite un único workflow que compile y pruebe todos los módulos); los servicios son independientes en datos, contratos y código, pero no tienen pipelines de despliegue separados | Un workflow por módulo con filtros de rutas y un Dockerfile por servicio, si los servicios pasaran a repositorios o equipos distintos |
 | Claves de idempotencia | Se guardan sin expiración | Depurarlas tras 24–72 h |
 | Retención de auditoría y notificaciones | Los registros se conservan indefinidamente; suficiente a la escala académica | Política de retención: archivado/depuración periódica según normativa (p. ej. particionar por mes y archivar) |
 | Propiedad de la tabla de auditoría | La crea `auditoria_user`, que como dueño podría eliminar los *triggers* | Tabla de un rol administrador; el servicio solo con `INSERT`/`SELECT` |
