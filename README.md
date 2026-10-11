@@ -50,7 +50,7 @@ las especificaciones por servicio en [`docs/specs/`](docs/specs/), la guía de s
 
 ## Requisitos
 
-* JDK 21
+* JDK 21 (solo para compilar o abrir el proyecto en un IDE; los contenedores traen su propio JDK)
 * Docker y Docker Compose v2 (infraestructura y pruebas de integración con Testcontainers)
 * `curl`, `openssl` (scripts)
 
@@ -77,15 +77,18 @@ docker compose -f infra/docker-compose.yml down        # añadir -v para borrar 
 ### Alternativa: todo en contenedores (un solo comando)
 
 ```bash
-scripts/preparar-entorno.sh
-docker compose -f infra/docker-compose.yml --profile apps up -d --build
-# detener: docker compose -f infra/docker-compose.yml --profile apps down
+scripts/levantar-docker.sh     # crea infra/.env si falta, construye, levanta y espera a que todo esté healthy
+scripts/bajar-docker.sh        # detiene y elimina los contenedores (con -v borra también los datos)
 ```
+
+`levantar-docker.sh` genera `infra/.env` con contraseñas aleatorias solo si no existe (el repositorio no contiene
+credenciales), detiene los procesos del host que usarían los mismos puertos y ejecuta
+`docker compose -f infra/docker-compose.yml --profile apps up -d --build`.
 
 El perfil `apps` construye una imagen por servicio a partir del `Dockerfile` de la raíz (multi-etapa, argumento
 `MODULE`, usuario sin privilegios, agente OpenTelemetry con hash verificado y *healthcheck*) y los arranca en el orden
-correcto (Eureka → resto). Los puertos son los mismos; **detenga antes los procesos del host**
-(`scripts/detener-todo.sh`). Sin el perfil, `docker compose up` levanta solo la infraestructura.
+correcto (Eureka → resto). La primera construcción tarda varios minutos; las siguientes usan caché.
+Sin el perfil, `docker compose up` levanta solo la infraestructura.
 
 | Panel | URL |
 |---|---|

@@ -990,6 +990,15 @@ Flujo de integración: `feature/*` → `dev` → `stage` → `main`.
 
 *Comandos verificados en la máquina de desarrollo (Ubuntu 24.04, JDK 21, Docker 29).*
 
+**Opción A: todo en contenedores (un solo comando)**
+
+```bash
+scripts/levantar-docker.sh     # prepara infra/.env, construye, levanta los 8 servicios y espera a que estén healthy
+scripts/bajar-docker.sh        # detiene y elimina los contenedores (con -v también los datos)
+```
+
+**Opción B: infraestructura en Docker y servicios como procesos del host**
+
 ```bash
 # 1. Infraestructura (PostgreSQL, RabbitMQ, Jaeger, Seq)
 scripts/preparar-entorno.sh          # crea infra/.env con contraseñas aleatorias (no versionado)
