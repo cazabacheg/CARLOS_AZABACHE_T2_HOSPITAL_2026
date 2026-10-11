@@ -1,0 +1,20 @@
+2026-10-11T19:25:28.4562082Z [INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.740 s -- in pe.edu.cibertec.vidasalud.
+2026-10-11T19:25:29.3294487Z [INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.877 s -- in pe.edu.cibertec.vidasalud.
+2026-10-11T19:25:29.4507603Z [INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.125 s -- in pe.edu.cibertec.vidasalud.
+2026-10-11T19:25:29.4511702Z [INFO] Running pe.edu.cibertec.vidasalud.commons.paginacion.ParametrosPaginaTest
+2026-10-11T19:25:29.5072291Z [ERROR] Tests run: 6, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.053 s <<< FAILURE! -- in pe.edu.ciber
+2026-10-11T19:25:29.5074832Z [ERROR] pe.edu.cibertec.vidasalud.commons.paginacion.ParametrosPaginaTest.usaValoresPorDefecto -- Time elapsed:
+2026-10-11T19:25:29.5092185Z expected: 25
+2026-10-11T19:25:29.5092635Z  but was: 20
+2026-10-11T19:25:29.5093832Z 	at pe.edu.cibertec.vidasalud.commons.paginacion.ParametrosPaginaTest.usaValoresPorDefecto(ParametrosPaginaTest
+2026-10-11T19:25:31.1668852Z [INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.653 s -- in pe.edu.cibertec.vidasalud.
+2026-10-11T19:25:31.1842362Z [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in pe.edu.cibertec.vidasalud.
+2026-10-11T19:25:31.2350702Z [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.050 s -- in pe.edu.cibertec.vidasalud.
+2026-10-11T19:25:31.5652413Z [ERROR]   ParametrosPaginaTest.usaValoresPorDefecto:20 
+2026-10-11T19:25:31.5653233Z expected: 25
+2026-10-11T19:25:31.5654438Z  but was: 20
+2026-10-11T19:25:31.5655944Z [ERROR] Tests run: 28, Failures: 1, Errors: 0, Skipped: 0
+2026-10-11T19:25:31.5685470Z [INFO] Reactor Summary for Hospital Vida Salud - Parent 1.0.0-SNAPSHOT:
+2026-10-11T19:25:31.5688642Z [INFO] Hospital Vida Salud - Parent ....................... SUCCESS [  1.453 s]
+2026-10-11T19:25:31.5689626Z [INFO] Hospital Vida Salud - Commons ...................... FAILURE [ 17.439 s]
+2026-10-11T19:25:31.5697332Z [INFO] BUILD FAILURE
