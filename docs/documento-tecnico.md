@@ -379,12 +379,13 @@ Versión reducida del Proceso 7: un único concepto de **pago** con su concepto 
 * El pago se registra normalmente **antes** de la atención, para consolidar la reserva; por eso referencia opcionalmente a la **cita** (`cita_id`), sin validarla. Confirmar una cita **no** exige pago (evita acoplar Citas con Pagos; mejora futura).
 * El número de operación lo genera el servicio; la restricción `UNIQUE` garantiza que no se duplique. Un pago anulado conserva su número.
 * La anulación requiere motivo y no tiene plazo.
+* **Idempotencia:** `POST /api/pagos` exige la cabecera `Idempotency-Key`. Si el cliente reintenta (p. ej. tras un timeout) con la misma clave y los mismos datos, recibe **el mismo pago** (`Idempotent-Replayed: true`) y no se registra otro; con la misma clave y datos distintos → `422`. La clave se guarda con el pago (`UNIQUE`). Es el único `POST` que lo necesita: los demás tienen una clave natural que impide duplicados (documento del paciente, horario de la cita, una atención por cita).
 
 **Endpoints**
 
 | Método y ruta | Resultado | Errores |
 |---|---|---|
-| `POST /api/pagos` | `201` pago `REGISTRADO` con su `numeroOperacion` generado | `400` `MONTO_INVALIDO` (≤ 0, > 2 decimales o > 100 000.00) u otros campos; `404` paciente inexistente; `422` paciente inactivo; `503`/`504` Pacientes no disponible |
+| `POST /api/pagos` + cabecera `Idempotency-Key` | `201` pago `REGISTRADO` con su `numeroOperacion` generado (repetición: el mismo pago) | `400` `MONTO_INVALIDO` (≤ 0, > 2 decimales o > 100 000.00), `CLAVE_IDEMPOTENCIA_REQUERIDA` u otros campos; `422 CLAVE_IDEMPOTENCIA_REUTILIZADA`; `404` paciente inexistente; `422` paciente inactivo; `503`/`504` Pacientes no disponible |
 | `GET /api/pagos/{id}` | `200` | `404` |
 | `GET /api/pagos?pacienteId=&citaId=&numeroOperacion=&estado=&medioPago=&fecha=` | `200` `Flux` paginado | — |
 | `PATCH /api/pagos/{id}/anular` `{ "motivo" }` | `200` | `400` sin motivo, `404`, `409` ya anulado o modificación concurrente |
@@ -711,7 +712,9 @@ CREATE TABLE pago (
   estado            VARCHAR(10)   NOT NULL DEFAULT 'REGISTRADO' CHECK (estado IN ('REGISTRADO','ANULADO')),
   motivo_anulacion  VARCHAR(200),
   fecha_actualizacion TIMESTAMPTZ NOT NULL DEFAULT now(),
-  version           BIGINT        NOT NULL DEFAULT 0   -- bloqueo optimista
+  version           BIGINT        NOT NULL DEFAULT 0,  -- bloqueo optimista
+  clave_idempotencia VARCHAR(64)  NOT NULL UNIQUE,     -- cabecera Idempotency-Key
+  huella_solicitud  CHAR(64)      NOT NULL             -- SHA-256 del cuerpo, detecta reutilización
 );
 CREATE SEQUENCE pago_operacion_seq;   -- número de operación OP-yyyyMMdd-NNNNNN
 CREATE INDEX ix_pago_paciente ON pago (paciente_id);
@@ -758,12 +761,12 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 | `400` | Datos inválidos (campos obligatorios, formatos, fecha fuera del horario) |
 | `404` | Recurso inexistente |
 | `409` | Conflicto: duplicado, choque de agenda, transición de estado no permitida, modificación concurrente |
-| `422` | Regla de negocio sobre una referencia (paciente inactivo) |
+| `422` | Regla de negocio sobre una referencia (paciente inactivo) o clave de idempotencia reutilizada con otros datos |
 | `503` / `504` | Dependencia síncrona no disponible / agotó el tiempo |
 
 ## 9.3 Catálogo de códigos de negocio
 
-`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `FUERA_DE_VENTANA_ATENCION`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`.
+`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `FUERA_DE_VENTANA_ATENCION`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`, `CLAVE_IDEMPOTENCIA_REQUERIDA`, `CLAVE_IDEMPOTENCIA_REUTILIZADA`.
 
 ## 9.4 Ejemplos de contrato
 
@@ -799,7 +802,7 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 { "citaId": "b53a…", "area": "CONSULTA_EXTERNA" }
 ```
 
-**`POST /api/pagos`**
+**`POST /api/pagos`** (cabecera `Idempotency-Key: 3f6c2a1e-7b1d-4a8e-9c55-0d2f1b7a9e10`)
 
 ```json
 {
@@ -982,7 +985,7 @@ source scripts/entorno-dev.sh        # exporta variables para los servicios
 | Servicios restantes (Laboratorio, Hospitalización, Farmacia) | Diseñados en §5.8 | Implementarlos con el mismo patrón |
 | Swagger agregado | Una UI por servicio | Agregación de especificaciones en el Gateway |
 | Cargos de facturación | Solo pagos con concepto | Entidad `cargo` separada |
-| Reintentos de `POST /api/pagos` | Un reenvío del cliente (p. ej. tras un timeout) registra dos pagos, porque el número lo genera el servidor | Cabecera `Idempotency-Key` guardada con el pago |
+| Claves de idempotencia | Se guardan sin expiración | Depurarlas tras 24–72 h |
 | Pago y reserva | Confirmar una cita no exige pago | Regla "cita pagada para confirmar" vía consulta o evento de Pagos |
 | Despliegue | Docker Compose local | Imágenes en un registro y despliegue automatizado |
 
@@ -1030,7 +1033,7 @@ Se hacen **commits locales pequeños y descriptivos** durante todo el proceso (e
 - [ ] Panel de RabbitMQ: exchange, colas y mensaje publicado y consumido.
 - [ ] Atención registrada sobre cita confirmada, rechazo sobre cita no confirmada y cita pasando a `ATENDIDA` por evento.
 - [ ] Cancelación a menos de 24 h rechazada (`409 FUERA_DE_PLAZO`); atención a más de 30 min de la cita rechazada (`409 FUERA_DE_VENTANA_ATENCION`); atención anulada antes de la hora → cita `CANCELADA`.
-- [ ] Pago registrado, rechazo por monto ≤ 0 (`400`) y por número de operación duplicado (`409`).
+- [ ] Pago registrado, rechazo por monto ≤ 0 (`400`) y reintento con la misma `Idempotency-Key` que devuelve el mismo pago sin duplicarlo.
 - [ ] Swagger UI de un servicio y colección Postman ejecutada.
 - [ ] Registros en las tablas `notificacion` y `evento_auditoria`.
 - [ ] Tablas en PostgreSQL con datos (persistencia vía R2DBC).

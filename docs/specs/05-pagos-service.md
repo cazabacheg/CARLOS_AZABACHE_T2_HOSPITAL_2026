@@ -9,7 +9,7 @@
 Registrar y anular **pagos simulados** de pacientes. Versión reducida del Proceso 7: cada pago lleva su concepto de cobro; no hay entidad de cargo separada (documento §14).
 
 * Valida al paciente con una llamada **síncrona** a Pacientes (mismo contrato que Citas).
-* Garantiza **monto > 0** y **número de operación único** (generado por el propio servicio).
+* Garantiza **monto > 0**, **número de operación único** (generado por el propio servicio) e **idempotencia** del registro mediante la cabecera `Idempotency-Key` (§5.5).
 * El pago se registra normalmente **antes** de la atención, para consolidar la reserva; por eso se referencia opcionalmente a la **cita**, no a la atención.
 * Publica `pago.registrado` y `pago.anulado`.
 
@@ -46,6 +46,8 @@ fecha_actualizacion  TIMESTAMPTZ  NOT NULL DEFAULT now(),
 version              BIGINT       NOT NULL DEFAULT 0
 -- + índice: CREATE INDEX ix_pago_fecha ON pago (fecha_pago);
 -- + secuencia: CREATE SEQUENCE IF NOT EXISTS pago_operacion_seq;
+clave_idempotencia   VARCHAR(64)  NOT NULL UNIQUE,   -- cabecera Idempotency-Key
+huella_solicitud     CHAR(64)     NOT NULL           -- SHA-256 (hex) del cuerpo normalizado
 ```
 
 | Campo Java | Columna | Tipo |
@@ -63,6 +65,8 @@ version              BIGINT       NOT NULL DEFAULT 0
 | `motivoAnulacion` | `motivo_anulacion` | `String` (nullable) |
 | `fechaActualizacion` | `fecha_actualizacion` | `OffsetDateTime` |
 | `version` | `version` | `Long` con `@Version` |
+| `claveIdempotencia` | `clave_idempotencia` | `String` (única) |
+| `huellaSolicitud` | `huella_solicitud` | `String` (SHA-256 hex) |
 
 Métodos de dominio:
 
@@ -82,7 +86,7 @@ La regla de monto vive en el **dominio** (no solo en anotaciones) para devolver 
 
 El **número de operación lo genera el servicio** con la secuencia `pago_operacion_seq`: `OP-<yyyyMMdd en Lima>-<NNNNNN>` (p. ej. `OP-20261012-000001`). La restricción `UNIQUE` sigue siendo la garantía de no duplicación exigida por el enunciado. Un pago anulado **conserva** su número.
 
-**Limitación documentada (reintentos del cliente):** como el número lo asigna el servidor, si el cliente reenvía el mismo `POST` (p. ej. tras un timeout de red) se registran **dos pagos**. La solución estándar es una cabecera `Idempotency-Key` guardada con el pago; queda como mejora (documento §14).
+**Reintentos del cliente:** como el número lo asigna el servidor, un reenvío del mismo `POST` (p. ej. tras un timeout de red) registraría dos pagos. Se evita con la cabecera **`Idempotency-Key`** (§5.5, D-38).
 
 ## 4. Cliente síncrono a Pacientes
 
@@ -96,10 +100,11 @@ Mismo diseño y tabla de errores que `PacientesClient` de Citas (spec 03 §4), c
 
 Orden de más barato a más caro:
 
+0. **Idempotencia** (§5.5): validar la cabecera; si ya existe un pago con esa clave → devolverlo (o `422` si el cuerpo difiere) y **terminar aquí**.
 1. `ReglasPago.validarMonto` → `400 MONTO_INVALIDO`, sin E/S.
 2. `pacientesClient.obtener(pacienteId)` → `404` / `503` / `504`; `INACTIVO` → `422`.
 3. `SELECT nextval('pago_operacion_seq')` → número de operación.
-4. `Pago.registrar(...)`; `save` con `onErrorMap(DuplicateKeyException → 409 OPERACION_DUPLICADA)` (no debería ocurrir con la secuencia, pero la traducción queda por si la restricción se dispara).
+4. `Pago.registrar(...)` con `claveIdempotencia` y `huellaSolicitud`; `save`. Ante `DuplicateKeyException`: se busca por `clave_idempotencia`; si existe → era una petición **simultánea** con la misma clave → se aplica la regla de repetición de §5.5; si no existe → la violación fue de `numero_operacion` → `409 OPERACION_DUPLICADA` (no debería ocurrir con la secuencia).
 5. Publicar `pago.registrado`; `201`.
 
 ### 5.2 Obtener — `404 PAGO_NO_ENCONTRADO`.
@@ -115,13 +120,32 @@ Filtros: `pacienteId`, `citaId`, `numeroOperacion`, `estado`, `medioPago`, `fech
 3. `save` (409 `CONFLICTO_CONCURRENTE` por `@Version`).
 4. Publicar `pago.anulado`.
 
-Sin plazo para anular (D-31).
+Sin plazo para anular (D-31). Anular ya es seguro ante reintentos: un segundo intento devuelve `409 PAGO_YA_ANULADO` y el estado no cambia.
+
+### 5.5 Idempotencia del registro (`Idempotency-Key`, D-38)
+
+Patrón del borrador IETF *The Idempotency-Key HTTP Header Field*:
+
+| Situación | Respuesta |
+|---|---|
+| Falta la cabecera, o no cumple `^[A-Za-z0-9-]{8,64}$` | `400 CLAVE_IDEMPOTENCIA_REQUERIDA`, "La cabecera Idempotency-Key es obligatoria (8–64 caracteres alfanuméricos o guiones)." |
+| Clave nueva | Flujo normal; la clave y la huella se guardan **con** el pago (mismo `INSERT`, sin tabla aparte) |
+| Clave existente y **misma huella** | `201` con el **mismo** pago y cabecera `Idempotent-Replayed: true`; **no** se registra otro pago **ni** se publica otro evento |
+| Clave existente y **huella distinta** | `422 CLAVE_IDEMPOTENCIA_REUTILIZADA`, "La clave de idempotencia ya se usó con datos diferentes." |
+| Dos peticiones simultáneas con la misma clave | La segunda choca con `UNIQUE(clave_idempotencia)`, relee el pago y responde como repetición |
+
+* **Huella:** SHA-256 en hexadecimal de `pacienteId|citaId|concepto(trim)|monto(escala 2)|medioPago`. Clase pura `HuellaSolicitud`.
+* Solo se guardan las claves de pagos **creados**: si una petición falla por validación o porque Pacientes no responde, el reintento con la misma clave vuelve a ejecutarse normalmente (no hubo efecto).
+* Las claves no expiran (simplificación académica; en producción se depuran tras 24–72 h).
+* El Gateway reenvía la cabecera sin cambios.
+* **Solo Pagos la necesita:** los demás `POST` ya tienen una clave natural que impide duplicados (documento del paciente, índice de agenda de la cita, una atención por cita).
 
 ## 6. API
 
 ### 6.1 DTOs
 
 ```text
+// + cabecera obligatoria: Idempotency-Key
 PagoCrearRequest(@NotNull UUID pacienteId, UUID citaId,
                  @NotBlank @Size(max=120) String concepto,
                  @NotNull BigDecimal monto,
@@ -137,7 +161,7 @@ PagoResponse(id, numeroOperacion, pacienteId, citaId, concepto, monto, moneda,
 
 | Método y ruta | OK | Errores |
 |---|---|---|
-| `POST /api/pagos` | `201` + `Location` (incluye el `numeroOperacion` generado) | `400 VALIDACION_FALLIDA` / `MONTO_INVALIDO`; `404 PACIENTE_NO_ENCONTRADO`; `422 PACIENTE_INACTIVO`; `503`/`504 SERVICIO_PACIENTES_NO_DISPONIBLE` |
+| `POST /api/pagos` + cabecera `Idempotency-Key` | `201` + `Location` (incluye el `numeroOperacion` generado); repetición → `201` + `Idempotent-Replayed: true` | `400 VALIDACION_FALLIDA` / `MONTO_INVALIDO` / `CLAVE_IDEMPOTENCIA_REQUERIDA`; `422 CLAVE_IDEMPOTENCIA_REUTILIZADA`; `404 PACIENTE_NO_ENCONTRADO`; `422 PACIENTE_INACTIVO`; `503`/`504 SERVICIO_PACIENTES_NO_DISPONIBLE` |
 | `GET /api/pagos/{id}` | `200` | `400`, `404 PAGO_NO_ENCONTRADO` |
 | `GET /api/pagos` | `200` + `X-Total-Count` | `400` |
 | `PATCH /api/pagos/{id}/anular` | `200` | `400` (sin motivo), `404`, `409 PAGO_YA_ANULADO` / `CONFLICTO_CONCURRENTE` |
@@ -159,18 +183,20 @@ Este servicio **no consume** eventos.
 |---|---|---|
 | `ReglasPagoTest` | Unitaria (parametrizada) | **`0` → `MONTO_INVALIDO`; `-50.00` → `MONTO_INVALIDO`**; `0.001` → 3 decimales; `0.01` OK; `100000.00` OK; `100000.01` → excede |
 | `PagoTest` | Unitaria | `registrar` queda `REGISTRADO` con `fechaPago` del `Clock` y el número recibido; `anular` dos veces → 409 `PAGO_YA_ANULADO` |
+| `HuellaSolicitudTest` | Unitaria | Mismo cuerpo → misma huella; `80` y `80.00` → misma huella; cambiar el monto o el paciente → huella distinta |
 | `PacientesClientTest` | `MockWebServer` | Igual que en Citas (200, 404, 500, retraso, reintento) |
-| `PagoServiceTest` | `StepVerifier` + Mockito | Registro OK publica `pago.registrado` con monto; **monto 0 → 400 sin llamar a Pacientes**; paciente inactivo → 422; el número generado tiene formato `OP-yyyyMMdd-NNNNNN`; `DuplicateKeyException` → 409 `OPERACION_DUPLICADA`; anular publica `pago.anulado` con motivo |
-| `PagoControllerTest` | `@WebFluxTest` | `POST` OK 201; **`monto: -10` → 400 `problem+json` con `codigo=MONTO_INVALIDO`**; `medioPago` desconocido → 400; sin `concepto` → 400; `GET` inexistente → 404; anular sin motivo → 400 |
+| `PagoServiceTest` | `StepVerifier` + Mockito | Registro OK publica `pago.registrado` con monto; **monto 0 → 400 sin llamar a Pacientes**; paciente inactivo → 422; el número generado tiene formato `OP-yyyyMMdd-NNNNNN`; `DuplicateKeyException` → 409 `OPERACION_DUPLICADA`; anular publica `pago.anulado` con motivo; **misma clave y mismo cuerpo → devuelve el pago existente, sin guardar, sin llamar a Pacientes y sin publicar**; misma clave y otro monto → 422; `DuplicateKeyException` por clave (carrera) → devuelve el existente |
+| `PagoControllerTest` | `@WebFluxTest` | `POST` OK 201; **`monto: -10` → 400 `problem+json` con `codigo=MONTO_INVALIDO`**; `medioPago` desconocido → 400; sin `concepto` → 400; `GET` inexistente → 404; anular sin motivo → 400; **sin cabecera `Idempotency-Key` → 400 `CLAVE_IDEMPOTENCIA_REQUERIDA`**; repetición → 201 con `Idempotent-Replayed: true` |
 | `PagoRepositoryIT` | PostgreSQL | `CHECK (monto > 0)` rechaza un insert directo con 0; `numero_operacion` duplicado (insert directo) → `DuplicateKeyException`; la secuencia genera números distintos; filtros y paginación |
-| `PagoFlujoIT` | PostgreSQL + RabbitMQ + `MockWebServer` (Pacientes) | `POST` → fila en BD → mensaje `pago.registrado` en una cola de prueba |
+| `PagoFlujoIT` | PostgreSQL + RabbitMQ + `MockWebServer` (Pacientes) | `POST` → fila en BD → mensaje `pago.registrado` en una cola de prueba; **el mismo `POST` con la misma clave enviado dos veces → una sola fila y un solo mensaje**; dos `POST` simultáneos con la misma clave → una sola fila |
 
-Caso del enunciado §24 cubierto aquí: **validación de monto de pago no permitido**.
+Caso del enunciado §24 cubierto aquí: **validación de monto de pago no permitido**. Además: no duplicación de pagos ante reintentos.
 
 ## 9. Ejemplos
 
 ```json
 POST /api/pagos
+Idempotency-Key: 3f6c2a1e-7b1d-4a8e-9c55-0d2f1b7a9e10
 {
   "pacienteId": "…",
   "citaId": "…",
@@ -189,6 +215,7 @@ PATCH /api/pagos/{id}/anular
 - [ ] `./mvnw -pl pagos-service -am verify` en verde.
 - [ ] `PAGOS-SERVICE` en Eureka; llamada a Pacientes por nombre.
 - [ ] Vía Gateway: pago válido → `201` con número `OP-…`; `monto: 0` → `400 MONTO_INVALIDO`; paciente inexistente → `404`.
+- [ ] Reenviar el mismo pago con la misma `Idempotency-Key` → mismo `numeroOperacion`, `Idempotent-Replayed: true` y una sola fila en `pago`; misma clave con otro monto → `422`; sin clave → `400`.
 - [ ] Anular → `200`; anular otra vez → `409 PAGO_YA_ANULADO`.
 - [ ] Fila en `pagos_db.pago` y mensaje `pago.registrado` en RabbitMQ.
 
@@ -196,7 +223,7 @@ PATCH /api/pagos/{id}/anular
 
 1. §8.4: columnas `moneda`, `motivo_anulacion`, `fecha_actualizacion`, `version`; `CHECK` con máximo; índice por fecha.
 2. §5.6: endpoint de anulación con motivo obligatorio; número de operación generado por secuencia; `citaId` en lugar de `atencionId`; tope de monto; limitación de reintentos.
-4. §14: mejoras `Idempotency-Key` y "exigir pago para confirmar la cita".
+4. §14: mejora "exigir pago para confirmar la cita"; la idempotencia pasa a estar **implementada** (§5.6, §9.3: códigos `CLAVE_IDEMPOTENCIA_REQUERIDA`, `CLAVE_IDEMPOTENCIA_REUTILIZADA`).
 3. §9.3: (los códigos ya están: `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_NO_ENCONTRADO`, `PAGO_YA_ANULADO`).
 
 ## 12. Decisiones (todas aprobadas)
@@ -206,4 +233,5 @@ PATCH /api/pagos/{id}/anular
 | D-30 | **Aprobado (revisado):** el pago referencia opcionalmente a la **cita** (`citaId`), sin validarla, porque se paga antes de la atención para consolidar la reserva. Confirmar una cita **no** exige pago (mejora futura) | Validar la cita / exigir pago para confirmar |
 | D-31 | **Aprobado:** Anular no tiene plazo; requiere motivo | Permitir anular solo el mismo día |
 | D-32 | **Aprobado (revisado):** número de operación generado por secuencia (`OP-yyyyMMdd-NNNNNN`); reintentos duplicados del cliente documentados como limitación | Número enviado por el cliente |
+| D-38 | **Aprobado:** `Idempotency-Key` **obligatoria** en `POST /api/pagos`, guardada con el pago junto a la huella del cuerpo; repetición devuelve el mismo pago | Clave opcional / sin idempotencia |
 | D-33 | **Aprobado:** moneda única `PEN` y monto máximo 100 000.00 | Multimoneda / sin tope |
