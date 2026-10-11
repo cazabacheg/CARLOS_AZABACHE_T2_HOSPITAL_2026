@@ -589,7 +589,7 @@ Casos:
 | Mismo número, distinto tipo | `CE` con número `000000001` vs `PASAPORTE 000000001` → ambos se guardan (usar un número válido para los dos tipos) |
 | `existsBy...` | `true` para el existente; `false` para otro tipo con el mismo número |
 | Actualización hace `UPDATE` | `findById` → `cambiarEstado(INACTIVO)` → `save` → `findById` devuelve `INACTIVO` y `count()` sigue en 1 |
-| Filtros y paginación | Sembrar 5 pacientes (apellidos `Alva`, `Benites`, `Benavides`, `Castro`, `Díaz`; uno INACTIVO). `estado=ACTIVO` → `contar` = 4; `apellidos="BEN"` → 2 (insensible a mayúsculas); `tipo+número` → 1; `ParametrosPagina(0,2)` → `[Alva, Benavides]`, `(1,2)` → `[Benites, Castro]`, `(2,2)` → `[Díaz]`; `contar` sin filtro = 5 independientemente de la página |
+| Filtros y paginación | Sembrar 5 pacientes (apellidos `Alva`, `Benites`, `Benavides`, `Castro`, `Diaz`; uno INACTIVO). `estado=ACTIVO` → `contar` = 4; `apellidos="BEN"` → 2 (insensible a mayúsculas); `tipo+número` → 1; `ParametrosPagina(0,2)` → `[Alva, Benavides]`, `(1,2)` → `[Benites, Castro]`, `(2,2)` → `[Diaz]`; `contar` sin filtro = 5 independientemente de la página |
 | Comodines escapados | `apellidos="%"` → `contar` = 0 |
 
 ### 4.7 `PacienteFlujoIT` (`@SpringBootTest` + PostgreSQL + RabbitMQ)
