@@ -416,9 +416,14 @@ Versión reducida del Proceso 7: un único concepto de **pago** con su concepto 
 
 **Auditoría**
 
-* Consume **todos** los eventos (`#`).
-* Guarda: fecha del evento, tipo de recurso, id del recurso, estado anterior, estado nuevo, origen (servicio emisor), `event_id`.
-* `GET /api/auditoria?tipoRecurso=&recursoId=` → `Flux` de eventos. Solo lectura: no existen endpoints de escritura.
+* Consume **todos** los eventos (binding `#`): cualquier evento futuro se audita sin cambiar el servicio.
+* Guarda exactamente lo que pide el enunciado (§14): fecha del hecho, tipo de recurso, id del recurso, estado anterior, estado nuevo y origen (servicio emisor), además del tipo de evento y su `event_id`. **No** guarda el contenido (`datos`) de los eventos, para no almacenar información sensible.
+* El historial se ordena por el **momento del hecho** (`ocurrioEn`), no por el de llegada, porque los eventos pueden llegar desordenados.
+* **Inmutable en dos niveles:** la aplicación solo inserta (sin endpoints ni métodos de modificación o borrado), y *triggers* de PostgreSQL rechazan cualquier `UPDATE`, `DELETE` o `TRUNCATE` sobre la tabla.
+* Endpoints de solo lectura:
+  * `GET /api/auditoria?tipoRecurso=&recursoId=&tipoEvento=&origen=&desde=&hasta=` → `Flux` paginado.
+  * `GET /api/auditoria/{id}`.
+  * `GET /api/auditoria/recursos/{tipoRecurso}/{recursoId}/historial` → secuencia cronológica de estados del recurso (p. ej. `null→PENDIENTE`, `PENDIENTE→CONFIRMADA`, `CONFIRMADA→ATENDIDA`): evidencia directa de trazabilidad.
 
 **Idempotencia.** RabbitMQ garantiza *al menos una vez*. Ambos servicios guardan el `event_id` con restricción `UNIQUE`; si un evento llega duplicado, el segundo insert falla con violación de unicidad y se descarta de forma controlada.
 
@@ -678,7 +683,24 @@ CREATE TABLE evento_auditoria (
   fecha_registro   TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_auditoria_recurso ON evento_auditoria (tipo_recurso, recurso_id);
+CREATE INDEX ix_auditoria_fecha ON evento_auditoria (fecha_evento);
+
+-- Inmutabilidad a nivel de base de datos
+CREATE FUNCTION fn_auditoria_inmutable() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'evento_auditoria es inmutable: % no permitido', TG_OP;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tg_auditoria_sin_update_delete
+  BEFORE UPDATE OR DELETE ON evento_auditoria
+  FOR EACH ROW EXECUTE FUNCTION fn_auditoria_inmutable();
+CREATE TRIGGER tg_auditoria_sin_truncate
+  BEFORE TRUNCATE ON evento_auditoria
+  FOR EACH STATEMENT EXECUTE FUNCTION fn_auditoria_inmutable();
 ```
+
+*Nota de implementación:* como el inicializador de Spring separa sentencias por `;` y no reconoce los bloques `$$`, el `schema.sql` de Auditoría usa `@@` como separador.
 
 ## 8.4 `atenciones_db` y `pagos_db`
 
@@ -770,7 +792,7 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 
 ## 9.3 Catálogo de códigos de negocio
 
-`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `FUERA_DE_VENTANA_ATENCION`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`, `CLAVE_IDEMPOTENCIA_REQUERIDA`, `CLAVE_IDEMPOTENCIA_REUTILIZADA`, `NOTIFICACION_NO_ENCONTRADA`.
+`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `FUERA_DE_PLAZO`, `FUERA_DE_VENTANA_ATENCION`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`, `CLAVE_IDEMPOTENCIA_REQUERIDA`, `CLAVE_IDEMPOTENCIA_REUTILIZADA`, `NOTIFICACION_NO_ENCONTRADA`, `EVENTO_AUDITORIA_NO_ENCONTRADO`.
 
 ## 9.4 Ejemplos de contrato
 
@@ -990,6 +1012,8 @@ source scripts/entorno-dev.sh        # exporta variables para los servicios
 | Swagger agregado | Una UI por servicio | Agregación de especificaciones en el Gateway |
 | Cargos de facturación | Solo pagos con concepto | Entidad `cargo` separada |
 | Claves de idempotencia | Se guardan sin expiración | Depurarlas tras 24–72 h |
+| Retención de auditoría y notificaciones | Los registros se conservan indefinidamente; suficiente a la escala académica | Política de retención: archivado/depuración periódica según normativa (p. ej. particionar por mes y archivar) |
+| Propiedad de la tabla de auditoría | La crea `auditoria_user`, que como dueño podría eliminar los *triggers* | Tabla de un rol administrador; el servicio solo con `INSERT`/`SELECT` |
 | Pago y reserva | Confirmar una cita no exige pago | Regla "cita pagada para confirmar" vía consulta o evento de Pagos |
 | Despliegue | Docker Compose local | Imágenes en un registro y despliegue automatizado |
 

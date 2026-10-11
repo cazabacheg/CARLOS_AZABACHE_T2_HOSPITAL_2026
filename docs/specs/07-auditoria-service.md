@@ -20,7 +20,7 @@ Registrar de forma **inmutable** la trazabilidad de todos los cambios importante
 | Paquete base | `pe.edu.cibertec.vidasalud.auditoria` |
 | Base de datos | `auditoria_db` (usuario `auditoria_user`) |
 | Dependencias | Las de la spec 02 §2 (sin cliente HTTP ni loadbalancer) |
-| `application.yml` | Plantilla de la spec 02 §2.1 con puerto `8084` y variables `AUDITORIA_DB_*` |
+| `application.yml` | Plantilla de la spec 02 §2.1 con puerto `8084`, variables `AUDITORIA_DB_*` y `spring.sql.init.separator: "@@"` (ver §4.1) |
 
 ## 3. Cola
 
@@ -33,7 +33,7 @@ Eventos que llegan hoy: `paciente.registrado`, `paciente.estado-cambiado`, `cita
 
 ## 4. Modelo
 
-Tabla `evento_auditoria` (documento §8.3) con un ajuste: columna **`datos JSONB`** con la copia de `datos` del sobre (D-39) e índice por `fecha_evento`.
+Tabla `evento_auditoria` (documento §8.3) con un ajuste: índice por `fecha_evento`. **No** se guarda el campo `datos` del sobre (D-39): Auditoría registra solo lo que pide el enunciado, para no almacenar ninguna información potencialmente sensible.
 
 | Campo Java | Columna | Origen en el sobre |
 |---|---|---|
@@ -46,10 +46,7 @@ Tabla `evento_auditoria` (documento §8.3) con un ajuste: columna **`datos JSONB
 | `estadoAnterior` | `estado_anterior` | `estadoAnterior` (null en creaciones) |
 | `estadoNuevo` | `estado_nuevo` | `estadoNuevo` |
 | `origen` | `origen` | `origen` (servicio emisor) |
-| `datos` | `datos` (`JSONB`) | `datos` (sin datos personales, por diseño de los productores) |
 | `fechaRegistro` | `fecha_registro` | momento de la recepción |
-
-Mapeo de `JSONB` con `io.r2dbc.postgresql.codec.Json` (soportado por `r2dbc-postgresql`).
 
 Cubre exactamente lo que pide el enunciado §14: **fecha, identificador del recurso, estado anterior, estado nuevo y origen**.
 
@@ -64,7 +61,38 @@ Por cada mensaje (`ConsumidorEventos`, spec 00):
 
 **Orden de llegada.** Los eventos pueden llegar desordenados (reintentos, varios productores). Por eso el historial se ordena por `fecha_evento` (momento del hecho) y no por llegada.
 
-**Inmutabilidad (D-40).** El servicio solo **inserta**: no hay endpoints de modificación ni de borrado, y el repositorio no expone `update`/`delete` (se declara una interfaz propia con solo `save` de inserción y consultas, en lugar de heredar `ReactiveCrudRepository` completo).
+**Inmutabilidad (D-40), en dos niveles:**
+
+1. **Aplicación:** el servicio solo **inserta**; no hay endpoints de modificación ni de borrado, y el repositorio no expone `update`/`delete` (interfaz propia con inserción y consultas, en lugar de heredar `ReactiveCrudRepository` completo).
+2. **Base de datos:** *triggers* de PostgreSQL que rechazan cualquier `UPDATE`, `DELETE` o `TRUNCATE` sobre `evento_auditoria`, venga de donde venga (este servicio, un cliente SQL o un error de programación). Ver §4.1.
+
+### 4.1 `schema.sql` con el trigger
+
+El inicializador de Spring (`spring.sql.init`) separa sentencias por `;` y no reconoce los bloques `$$` de PL/pgSQL. Por eso este servicio usa el separador `@@` y cada sentencia de su `schema.sql` termina en `@@`:
+
+```sql
+CREATE TABLE IF NOT EXISTS evento_auditoria ( … )@@
+CREATE INDEX IF NOT EXISTS ix_auditoria_recurso ON evento_auditoria (tipo_recurso, recurso_id)@@
+CREATE INDEX IF NOT EXISTS ix_auditoria_fecha ON evento_auditoria (fecha_evento)@@
+
+CREATE OR REPLACE FUNCTION fn_auditoria_inmutable() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'evento_auditoria es inmutable: % no permitido', TG_OP
+    USING ERRCODE = 'P0001';
+END;
+$$ LANGUAGE plpgsql@@
+
+CREATE OR REPLACE TRIGGER tg_auditoria_sin_update_delete
+  BEFORE UPDATE OR DELETE ON evento_auditoria
+  FOR EACH ROW EXECUTE FUNCTION fn_auditoria_inmutable()@@
+
+CREATE OR REPLACE TRIGGER tg_auditoria_sin_truncate
+  BEFORE TRUNCATE ON evento_auditoria
+  FOR EACH STATEMENT EXECUTE FUNCTION fn_auditoria_inmutable()@@
+```
+
+* `CREATE OR REPLACE TRIGGER` requiere PostgreSQL ≥ 14 (se usa 16); hace el script repetible en cada arranque.
+* **Límite conocido:** el usuario dueño de la tabla (`auditoria_user`, que la crea) podría eliminar el trigger con `DROP TRIGGER`. La protección completa requiere que la tabla sea de otro rol y que el servicio solo tenga `INSERT`/`SELECT`; queda como mejora en el documento técnico (§14).
 
 ## 6. API (solo lectura)
 
@@ -74,7 +102,7 @@ Por cada mensaje (`ConsumidorEventos`, spec 00):
 | `GET /api/auditoria/{id}` | `200` | `400`, `404 EVENTO_AUDITORIA_NO_ENCONTRADO` |
 | `GET /api/auditoria/recursos/{tipoRecurso}/{recursoId}/historial` | `200` arreglo **cronológico** (`fecha_evento ASC`) con todos los eventos del recurso; vacío si no hay | `400` (`tipoRecurso` inválido) |
 
-`desde`/`hasta` son `OffsetDateTime` ISO-8601. `EventoAuditoriaResponse` expone todos los campos de §4 (`datos` como objeto JSON).
+`desde`/`hasta` son `OffsetDateTime` ISO-8601. `EventoAuditoriaResponse` expone todos los campos de §4.
 
 El endpoint de **historial** es la evidencia directa de trazabilidad (D-41). Ejemplo para una cita: `cita.creada (null→PENDIENTE)` → `cita.confirmada (PENDIENTE→CONFIRMADA)` → `cita.atendida (CONFIRMADA→ATENDIDA)`.
 
@@ -82,11 +110,11 @@ El endpoint de **historial** es la evidencia directa de trazabilidad (D-41). Eje
 
 | Clase | Tipo | Casos |
 |---|---|---|
-| `EventoAuditoriaMapperTest` | Unitaria | Sobre → entidad: `fechaEvento = ocurrioEn`; `estadoAnterior` nulo en creaciones; `datos` copiado; sobre sin `recursoId` → error de validación |
+| `EventoAuditoriaMapperTest` | Unitaria | Sobre → entidad: `fechaEvento = ocurrioEn`; `estadoAnterior` nulo en creaciones; `datos` **no** se copia; sobre sin `recursoId` → error de validación |
 | `AuditoriaServiceTest` | `StepVerifier` + Mockito | Inserta; `DuplicateKeyException` → completa sin error; historial ordenado ascendente |
 | `AuditoriaControllerTest` | `@WebFluxTest` | Filtros con `X-Total-Count`; `desde > hasta` → 400; historial con `tipoRecurso` inválido → 400; `GET` inexistente → 404 |
 | `AuditoriaConsumerIT` | PostgreSQL + RabbitMQ | **Publicar `cita.confirmada` → fila con `PENDIENTE → CONFIRMADA`, origen `citas-service`** (enunciado §14/§20); evento repetido → una sola fila; un evento de cualquier routing key (p. ej. `pago.anulado`) también llega (binding `#`); tres eventos de una cita publicados **en desorden** → el historial los devuelve en orden cronológico; JSON inválido → `auditoria.dlq` |
-| `AuditoriaRepositoryIT` | PostgreSQL | `datos` JSONB se guarda y se lee; unicidad de `event_id` |
+| `AuditoriaRepositoryIT` | PostgreSQL | `schema.sql` con separador `@@` se ejecuta (y se puede volver a ejecutar); unicidad de `event_id`; **`UPDATE` directo con `DatabaseClient` → error "evento_auditoria es inmutable"**; **`DELETE` → error**; **`TRUNCATE` → error** |
 
 ## 8. Criterios de aceptación
 
@@ -96,18 +124,20 @@ El endpoint de **historial** es la evidencia directa de trazabilidad (D-41). Eje
 - [ ] Tras el flujo completo de la demo, `GET /api/auditoria/recursos/CITA/{id}/historial` vía Gateway muestra la secuencia de estados de la cita con fechas y origen.
 - [ ] El mismo `cita.confirmada` aparece en Notificaciones **y** en Auditoría (dos consumidores de un evento).
 - [ ] No existe ningún endpoint ni método de repositorio para modificar o borrar registros.
+- [ ] `UPDATE evento_auditoria …` ejecutado con `psql` como `auditoria_user` falla con "evento_auditoria es inmutable" (evidencia).
 
-## 9. Ajustes que se propagan al documento técnico al aprobar
+## 9. Ajustes propagados al documento técnico (aplicados)
 
-1. §8.3: columna `datos JSONB` e índice por `fecha_evento`.
-2. §5.7: endpoint de historial por recurso, filtros por rango de fechas, inmutabilidad y orden por momento del hecho.
+1. §8.3: índice por `fecha_evento`; *triggers* de inmutabilidad.
+2. §5.7: endpoint de historial por recurso, filtros por rango de fechas, inmutabilidad en dos niveles, sin `datos`, orden por momento del hecho.
 3. §9.3: código `EVENTO_AUDITORIA_NO_ENCONTRADO`.
+4. §14: limitaciones/mejoras de retención y de propiedad de la tabla de auditoría.
 
-## 10. Decisiones abiertas para revisión
+## 10. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
-| D-39 | Guardar también `datos` del evento (JSONB) para tener el contexto completo de cada cambio | Guardar solo los campos del enunciado (fecha, recurso, estados, origen) |
-| D-40 | Inmutabilidad **en la aplicación** (solo inserción, sin endpoints ni métodos de modificación) | Además, un *trigger* en PostgreSQL que bloquee `UPDATE`/`DELETE` (más fuerte, pero complica `schema.sql` por los bloques `$$`) |
-| D-41 | Endpoint de historial cronológico por recurso | Solo el listado con filtros |
-| D-42 | Sin política de retención (los registros se conservan indefinidamente) | Depuración periódica |
+| D-39 | **Aprobado (revisado):** guardar **solo** los campos del enunciado (fecha, recurso, estados, origen, tipo); **sin** `datos`, para no almacenar información sensible | Guardar también `datos` en JSONB |
+| D-40 | **Aprobado (revisado):** inmutabilidad en la aplicación **y** con *triggers* de PostgreSQL (`UPDATE`/`DELETE`/`TRUNCATE`), separador `@@` en `schema.sql` | Solo a nivel de aplicación |
+| D-41 | **Aprobado:** Endpoint de historial cronológico por recurso | Solo el listado con filtros |
+| D-42 | **Aprobado:** sin política de retención a esta escala; anotado como limitación y mejora en el documento técnico | Depuración/archivado periódico |
