@@ -137,7 +137,7 @@ carpetas.append({"name": "02 Citas", "item": [
 # ---------------- 03 Atenciones ----------------
 PRE_PROXIMA = PRE_LIMA + r"""
 // Siguiente bloque de 30 min (a menos de 30 min de ahora): permite registrar la atencion de inmediato.
-let t = Date.now() + 2 * 60 * 1000;
+let t = Date.now() + 5 * 1000;
 const bloque = 30 * 60 * 1000;
 const lim = t - 5 * 3600 * 1000;
 t = Math.ceil(lim / bloque) * bloque + 5 * 3600 * 1000;

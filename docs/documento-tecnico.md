@@ -161,42 +161,28 @@ Se usa **una instancia PostgreSQL** con **una base de datos y un usuario por ser
 
 ```mermaid
 flowchart TB
-    C["Paciente / Personal autorizado<br/>(Postman, curl, Swagger)"] --> GW["API Gateway<br/>Spring Cloud Gateway :8080"]
-    GW -. "consulta instancias" .-> EU["Eureka Server :8761"]
-    GW -->|"/api/pacientes/**"| PA["pacientes-service :8081"]
-    GW -->|"/api/citas/**"| CI["citas-service :8082"]
-    GW -->|"/api/notificaciones/**"| NO["notificaciones-service :8083"]
-    GW -->|"/api/auditoria/**"| AU["auditoria-service :8084"]
-    GW -->|"/api/atenciones/**"| AT["atenciones-service :8085"]
-    GW -->|"/api/pagos/**"| PG["pagos-service :8086"]
-    PA -. "se registra" .-> EU
-    CI -. "se registra" .-> EU
-    NO -. "se registra" .-> EU
-    AU -. "se registra" .-> EU
-    AT -. "se registra" .-> EU
-    PG -. "se registra" .-> EU
-    CI -->|"HTTP síncrono (WebClient)<br/>GET /api/pacientes/{id}"| PA
-    AT -->|"HTTP síncrono<br/>GET /api/citas/{id}"| CI
-    PG -->|"HTTP síncrono<br/>GET /api/pacientes/{id}"| PA
-    PA --> DB1[("pacientes_db")]
-    CI --> DB2[("citas_db")]
-    NO --> DB3[("notificaciones_db")]
-    AU --> DB4[("auditoria_db")]
-    AT --> DB5[("atenciones_db")]
-    PG --> DB6[("pagos_db")]
-    PA -->|"publica eventos"| MQ{{"RabbitMQ<br/>exchange hospital.eventos"}}
-    CI -->|"publica eventos"| MQ
-    AT -->|"publica eventos"| MQ
-    PG -->|"publica eventos"| MQ
-    MQ -->|"notificaciones.cola"| NO
-    MQ -->|"auditoria.cola"| AU
-    MQ -->|"citas.atenciones.cola"| CI
-    OBS["Observabilidad (OpenTelemetry)<br/>Jaeger: trazas · Seq: logs"]
-    GW -. "OTLP" .-> OBS
-    CI -. "OTLP (todos los servicios)" .-> OBS
+    C["Cliente: Postman / curl / Swagger"] --> GW["API Gateway :8080<br/>Spring Cloud Gateway"]
+    GW -. "lb://nombre" .-> EU["Eureka Server :8761"]
+    GW --> PG["pagos :8086<br/>pagos_db"]
+    GW --> PA["pacientes :8081<br/>pacientes_db"]
+    GW --> CI["citas :8082<br/>citas_db"]
+    GW --> AT["atenciones :8085<br/>atenciones_db"]
+    GW --> NO["notificaciones :8083<br/>notificaciones_db"]
+    GW --> AU["auditoria :8084<br/>auditoria_db"]
+    PG -->|sync| PA
+    CI -->|sync| PA
+    AT -->|sync| CI
+    MQ{{"RabbitMQ: exchange hospital.eventos"}}
+    PG ==> MQ
+    PA ==> MQ
+    CI ==> MQ
+    AT ==> MQ
+    MQ ==> NO
+    MQ ==> AU
+    MQ ==> CI
 ```
 
-*Todas las bases residen en una instancia PostgreSQL con acceso mediante R2DBC; cada servicio solo tiene credenciales para la suya. Todos los servicios envían trazas y logs por OTLP (§7.4); por claridad se dibujan solo dos flechas.*
+*Flechas finas `sync`: llamadas HTTP síncronas entre servicios. Flechas gruesas: eventos asíncronos por RabbitMQ (colas `notificaciones.cola`, `auditoria.cola` y `citas.atenciones.cola`). Todas las bases residen en una instancia PostgreSQL con acceso mediante R2DBC; cada servicio solo tiene credenciales para la suya. Todos los servicios se registran en Eureka y envían trazas y logs por OTLP a Jaeger y Seq (§7.4); por claridad no se dibujan esas flechas.*
 
 ## 4.2 Por qué los clientes no deben depender de los puertos internos
 
@@ -1147,3 +1133,57 @@ Con `pacientes-service` detenido:
 ## 16.4 Observabilidad
 
 Una petición `POST /api/pacientes` por el Gateway produce **una traza de 17 *spans*** en Jaeger: Gateway → Pacientes → consultas SQL (R2DBC) → publicación en RabbitMQ → consumo en Notificaciones y en Auditoría, con sus `INSERT`. En Seq, filtrando por ese `TraceId`, aparecen los logs de los tres servicios. La respuesta HTTP incluye `X-Trace-Id` para localizar la petición.
+
+# Anexo A. Evidencias
+
+Capturas generadas con `scripts/capturar-evidencias.js` sobre el sistema en ejecución (índice completo en [`docs/evidencias/`](evidencias/README.md)).
+
+**A.1 Eureka: las 7 instancias registradas**
+
+![Panel de Eureka](evidencias/01-eureka-instancias-registradas.png)
+
+**A.2 API Gateway: rutas `lb://` hacia los servicios**
+
+![Rutas del Gateway](evidencias/02-gateway-rutas.png)
+
+**A.3 Salud del servicio de citas (base de datos, RabbitMQ y Eureka)**
+
+![Salud de citas-service](evidencias/03-salud-citas-service.png)
+
+**A.4 Flujo funcional completo por el Gateway (Newman: 49 peticiones, 86 aserciones, 0 fallos)**
+
+![Resumen de Newman](evidencias/04-newman-resumen.png)
+
+**A.5 Documentación interactiva (Swagger UI)**
+
+![Swagger de pacientes](evidencias/05a-swagger-pacientes.png)
+
+![Swagger de citas](evidencias/05b-swagger-citas.png)
+
+**A.6 Trazas distribuidas en Jaeger**
+
+Crear una cita: Gateway → Citas → Pacientes (llamada síncrona) con las consultas SQL de R2DBC.
+
+![Traza de crear cita](evidencias/06a-jaeger-traza-crear-cita.png)
+
+Confirmar una cita: la traza continúa por RabbitMQ hasta los consumidores de Notificaciones y Auditoría.
+
+![Traza de confirmar cita](evidencias/06b-jaeger-traza-confirmar-cita-rabbitmq.png)
+
+Con Pacientes caído: el servicio de citas responde `503` y la traza muestra el *span* fallido.
+
+![Traza del fallo con Pacientes caído](evidencias/06c-jaeger-traza-fallo-pacientes-503.png)
+
+**A.7 Logs centralizados en Seq, filtrados por `TraceId`**
+
+![Logs en Seq](evidencias/07-seq-logs-por-traceid.png)
+
+**A.8 RabbitMQ: exchange `hospital.eventos` y colas**
+
+![Exchanges de RabbitMQ](evidencias/08a-rabbitmq-exchanges.png)
+
+![Colas de RabbitMQ](evidencias/08b-rabbitmq-colas.png)
+
+**A.9 Persistencia SQL con R2DBC y trigger de inmutabilidad de la auditoría**
+
+![Datos en PostgreSQL](evidencias/09-postgres-persistencia.png)

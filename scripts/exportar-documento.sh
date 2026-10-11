@@ -55,10 +55,10 @@ header .title { font-size: 22pt; font-weight: bold; }
 header .subtitle { font-size: 12pt; color: #333; }
 CSS
 
-pandoc "${salida}/${base}.render.md" -f markdown+pipe_tables -t html5 --standalone --toc --toc-depth=2 \
+pandoc "${salida}/${base}.render.md" -f markdown+pipe_tables -t html5 --standalone --toc --toc-depth=2 --resource-path="${raiz}/docs" \
   --metadata lang=es --css "${salida}/estilo.css" --embed-resources \
   -o "${salida}/${base}.html" 2>/dev/null || \
-pandoc "${salida}/${base}.render.md" -f markdown+pipe_tables -t html5 --standalone --toc --toc-depth=2 \
+pandoc "${salida}/${base}.render.md" -f markdown+pipe_tables -t html5 --standalone --toc --toc-depth=2 --resource-path="${raiz}/docs" \
   --metadata lang=es --css "${salida}/estilo.css" --self-contained -o "${salida}/${base}.html"
 
 google-chrome --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer \
