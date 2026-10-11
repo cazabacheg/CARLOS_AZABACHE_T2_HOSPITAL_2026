@@ -1,9 +1,0 @@
-$ git push origin fix/test-secuencia-secuencial:main   # intento de push directo a main
-remote: error: GH006: Protected branch update failed for refs/heads/main.        
-remote: 
-remote: - Changes must be made through a pull request.        
-remote: 
-remote: - Required status check "build-test" is expected.        
-To https://github.com/cazabacheg/CARLOS_AZABACHE_T2_HOSPITAL_2026.git
- ! [remote rejected] fix/test-secuencia-secuencial -> main (protected branch hook declined)
-error: failed to push some refs to 'https://github.com/cazabacheg/CARLOS_AZABACHE_T2_HOSPITAL_2026.git'

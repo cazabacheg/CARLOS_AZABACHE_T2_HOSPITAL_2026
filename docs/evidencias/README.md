@@ -7,7 +7,7 @@ Capturas y salidas del sistema en ejecución (2026-10-11).
 | `01-eureka-instancias-registradas.png` | Panel de Eureka (:8761) con las 7 instancias (API-GATEWAY y 6 servicios) en UP. |
 | `02-gateway-rutas.png` | Respuesta real de `GET /actuator/gateway/routes`: las 6 rutas `lb://` del Gateway. |
 | `03-salud-citas-service.png` | `/actuator/health` de citas-service con r2dbc, rabbit y discoveryComposite en UP. |
-| `04-newman-resumen.png` | Resumen final de Newman (49 requests, 86 assertions, 0 fallos). Salida completa en `newman-salida.txt`. |
+| `04-newman-resumen.png` | Resumen final de Newman (49 requests, 86 assertions, 0 fallos). |
 | `05a-swagger-pacientes.png` | Swagger UI de pacientes-service (:8081) con sus endpoints. |
 | `05b-swagger-citas.png` | Swagger UI de citas-service (:8082) con sus endpoints. |
 | `06a-jaeger-traza-crear-cita.png` | Traza Jaeger de POST /api/citas: Gateway -> citas -> pacientes (spans SQL) y publicacion de evento. |
@@ -16,22 +16,16 @@ Capturas y salidas del sistema en ejecución (2026-10-11).
 | `07-seq-logs-por-traceid.png` | Seq filtrado por `@TraceId` de la traza 06b: logs de citas, notificaciones y auditoria. |
 | `08a-rabbitmq-exchanges.png` | RabbitMQ, pestana Exchanges, con `hospital.eventos` resaltado. |
 | `08b-rabbitmq-colas.png` | RabbitMQ, pestana Queues (colas y .dlq) con totales publicados/entregados/ack. |
-| `09-postgres-persistencia.png` | Conteos y filas por tabla y trigger de inmutabilidad ("evento_auditoria es inmutable"). Texto en `postgres-salida.txt`. |
-| `newman-salida.txt` | Salida completa de Newman. |
-| `postgres-salida.txt` | Salida SQL (sin documentos ni correos). |
-| `resumen-pruebas.txt` | Pruebas, fallos y errores por modulo (surefire + failsafe): 455 pruebas, 0 fallos, 0 errores. |
+| `09-postgres-persistencia.png` | Conteos y filas por tabla y trigger de inmutabilidad ("evento_auditoria es inmutable"). |
 
 ## Integración continua y políticas de rama
 
 | Archivo | Descripción |
 |---|---|
-| `push-directo-rechazado.txt` | Un *push* directo a `main` es rechazado por la política de rama (GH006). |
 | `ci-01-pr-fallo-controlado-rojo.png` | Pull request con la prueba rota a propósito: el CI queda en rojo. |
 | `ci-02-run-fallido.png` | Ejecución fallida de GitHub Actions (`expected: 25 but was: 20`). |
-| `ci-fallo-log.txt` | Extracto del log de la ejecución fallida. |
 | `ci-03-pr-corregido-verde.png` | Pull request tras la corrección: el CI en verde habilita el merge. |
 | `ci-04-run-exitoso.png` | Ejecución exitosa de GitHub Actions. |
-| `ci-exito-log.txt` | Extracto del log de la ejecución exitosa. |
 | `ci-05-actions-historial.png` | Historial de ejecuciones: 1 roja (fallo controlado) y el resto verdes. |
 | `ci-06-pull-requests-fusionados.png` | Pull requests fusionados por el flujo `dev` → `stage` → `main`. |
 | `ci-07-ramas-protegidas.png` | Ramas `main`, `stage` y `dev` protegidas. |

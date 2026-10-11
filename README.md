@@ -44,9 +44,9 @@ flowchart TB
 Spring Data R2DBC + PostgreSQL 16, RabbitMQ 3.13 (`reactor-rabbitmq`), OpenTelemetry (Jaeger y Seq),
 Testcontainers, Maven Wrapper, GitHub Actions.
 
-La documentación completa de diseño está en [`docs/documento-tecnico.md`](docs/documento-tecnico.md)
-las especificaciones por servicio en [`docs/specs/`](docs/specs/), la guía de sustentación en
-[`docs/guia-sustentacion.md`](docs/guia-sustentacion.md) y las evidencias en [`docs/evidencias/`](docs/evidencias/).
+La documentación completa de diseño está en [`docs/documento-tecnico.md`](docs/documento-tecnico.md),
+las especificaciones por servicio en [`docs/specs/`](docs/specs/)
+y las evidencias en [`docs/evidencias/`](docs/evidencias/).
 
 ## Requisitos
 
