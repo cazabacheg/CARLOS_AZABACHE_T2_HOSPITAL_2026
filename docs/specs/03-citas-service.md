@@ -272,7 +272,7 @@ PUT /api/citas/{id}/reprogramar
 - [ ] Atención registrada (spec 04) → la cita pasa a `ATENDIDA` en menos de 2 s.
 - [ ] Ningún `.block()` en el código (`git grep -n "\.block()" -- '*.java' ':!*Test.java' ':!*IT.java'` vacío).
 
-## 11. Ajustes que se propagan al documento técnico al aprobar
+## 11. Ajustes propagados al documento técnico (aplicados)
 
 1. §8.2: columna `version BIGINT NOT NULL DEFAULT 0` y secuencia `cita_codigo_seq`.
 2. §5.4 y §9.4: `especialidad` como código de catálogo (`MEDICINA_GENERAL`) y formato de código `CIT-yyyyMMdd-NNNNNN`.
@@ -280,13 +280,13 @@ PUT /api/citas/{id}/reprogramar
 4. §2.4: supuesto **A-07** (máximo 90 días de anticipación).
 5. §9.3: códigos `MISMA_FECHA_HORA` y `CONFLICTO_CONCURRENTE`.
 
-## 12. Decisiones abiertas para revisión
+## 12. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
-| D-16 | `especialidad` es un **catálogo cerrado** (enum de 7 valores) | Texto libre validado por longitud |
-| D-17 | `ATENDIDA` **no** se puede poner por `PATCH`; solo vía atención registrada (un único camino, RN-11/RN-12) | Permitirlo también por `PATCH` (dos caminos, riesgo de citas atendidas sin atención) |
-| D-18 | Bloqueo optimista con `@Version` para cambios concurrentes de estado | Sin control: el último en escribir gana |
-| D-19 | No se valida tiempo para `AUSENTE`/`CONFIRMADA` (p. ej. marcar ausente antes de la hora) — simplificación para poder demostrarlo sin esperar | Exigir que `AUSENTE` sea posterior a `fechaHora` (imposible de demostrar con citas futuras) |
-| D-20 | Reprogramar no vuelve a consultar a Pacientes | Revalidar el paciente también al reprogramar |
-| D-21 | Máximo 90 días de anticipación (supuesto A-07) | Sin límite |
+| D-16 | **Aprobado:** `especialidad` es un **catálogo cerrado** (enum de 7 valores) | Texto libre validado por longitud |
+| D-17 | **Aprobado:** `ATENDIDA` **no** se puede poner por `PATCH`; solo vía atención registrada (un único camino, RN-11/RN-12) | Permitirlo también por `PATCH` (dos caminos, riesgo de citas atendidas sin atención) |
+| D-18 | **Aprobado:** Bloqueo optimista con `@Version` para cambios concurrentes de estado | Sin control: el último en escribir gana |
+| D-19 | **Aprobado:** No se valida tiempo para `AUSENTE`/`CONFIRMADA` (p. ej. marcar ausente antes de la hora) — simplificación para poder demostrarlo sin esperar | Exigir que `AUSENTE` sea posterior a `fechaHora` (imposible de demostrar con citas futuras) |
+| D-20 | **Aprobado:** Reprogramar no vuelve a consultar a Pacientes | Revalidar el paciente también al reprogramar |
+| D-21 | **Aprobado:** Máximo 90 días de anticipación (supuesto A-07) | Sin límite |

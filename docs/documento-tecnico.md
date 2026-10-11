@@ -52,7 +52,7 @@ El enunciado permite justificar la profundidad de cada servicio. Esta es la deci
 |---|---|
 | Paciente | Solicita o consulta citas; recibe avisos (notificaciones simuladas). |
 | Personal de admisión | Registra pacientes; programa, reprograma, confirma y cancela citas. |
-| Personal de salud | Consulta información administrativa de pacientes y citas; registra la atención de una cita confirmada y marca citas como ausentes. |
+| Personal de salud | Consulta información administrativa de pacientes y citas; registra la atención de una cita confirmada (lo que la deja `ATENDIDA`) y marca citas como ausentes. |
 | Caja/administración | Registra pagos simulados y los anula. |
 | Laboratorio, Farmacia | Fuera de la implementación; sus procesos se describen en §5.8. |
 | Administrador del sistema | Supervisa servicios (panel Eureka, panel RabbitMQ, `/actuator/health`). |
@@ -77,7 +77,7 @@ El enunciado permite justificar la profundidad de cada servicio. Esta es la deci
 | RN-02 | Un paciente tiene estado `ACTIVO` o `INACTIVO`. Solo un paciente `ACTIVO` puede recibir citas nuevas. | Pacientes (dueño del dato) / Citas (la consulta) |
 | RN-03 | Una cita se asocia a paciente, especialidad, fecha-hora y estado válido. | Citas |
 | RN-04 | Estados de cita: `PENDIENTE`, `CONFIRMADA`, `ATENDIDA`, `CANCELADA`, `AUSENTE`; solo se permiten las transiciones de §6.3. | Citas |
-| RN-05 | No se puede confirmar una cita `CANCELADA`. No se puede marcar `ATENDIDA` una cita que no esté `CONFIRMADA`. | Citas |
+| RN-05 | No se puede confirmar una cita `CANCELADA`. No se puede marcar `ATENDIDA` una cita que no esté `CONFIRMADA`, y solo se llega a `ATENDIDA` registrando una atención (no por cambio de estado directo). | Citas |
 | RN-06 | **Agenda simplificada** (supuestos A-01…A-04, §2.4): un profesional no puede tener dos citas activas en el mismo horario; un paciente tampoco. | Citas |
 | RN-07 | La fecha-hora de una cita nueva o reprogramada debe ser futura y caer dentro del horario de atención. | Citas |
 | RN-08 | Todo cambio importante de estado se registra (fecha, recurso, estado anterior, estado nuevo, origen) y publica un evento asíncrono. | Citas, Pacientes → Auditoría |
@@ -86,6 +86,7 @@ El enunciado permite justificar la profundidad de cada servicio. Esta es la deci
 | RN-11 | Una atención solo puede registrarse sobre una cita **CONFIRMADA**; una cita tiene como máximo una atención no anulada. | Atenciones |
 | RN-12 | Al registrarse una atención, la cita pasa a `ATENDIDA` (consistencia eventual por evento). | Citas (reacciona al evento) |
 | RN-13 | Un pago se asocia a un paciente existente y activo. | Pagos |
+| RN-14 | Dos cambios simultáneos sobre la misma cita no pueden pisarse: el segundo se rechaza (bloqueo optimista). | Citas |
 
 ## 2.4 Supuestos de la agenda simplificada
 
@@ -97,6 +98,9 @@ El enunciado permite modelar una agenda simplificada si se documentan los supues
 * **A-04.** Se consideran "citas activas" las que están en `PENDIENTE` o `CONFIRMADA`. Las canceladas liberan el horario.
 * **A-05.** No se modelan feriados, vacaciones ni duración variable.
 * **A-06.** La zona horaria única es `America/Lima`.
+* **A-07.** Las citas se programan con un máximo de **90 días** de anticipación.
+* **A-08.** La especialidad se elige de un **catálogo cerrado**: Medicina General, Pediatría, Cardiología, Ginecología, Traumatología, Dermatología, Oftalmología (códigos `MEDICINA_GENERAL`, `PEDIATRIA`, …).
+* **A-09.** No se valida la hora para marcar `AUSENTE` o `CONFIRMADA` (simplificación para poder demostrarlo con citas futuras).
 
 ## 2.5 Estados y transiciones — vista de negocio
 
@@ -308,16 +312,18 @@ sequenceDiagram
 | `POST /api/pacientes` | `201` + paciente + `Location` | `400` validación, `409` documento duplicado |
 | `GET /api/pacientes/{id}` | `200` paciente | `404` no existe |
 | `GET /api/pacientes?estado=&numeroDocumento=` | `200` `Flux` de pacientes | — |
-| `PUT /api/pacientes/{id}` | `200` paciente actualizado | `400`, `404`, `409` |
+| `PUT /api/pacientes/{id}` | `200` paciente actualizado (el documento no se modifica) | `400`, `404` |
 | `PATCH /api/pacientes/{id}/estado` | `200` | `400`, `404` |
 
 Los listados (`GET` de colecciones) aceptan `pagina` y `tamano` y devuelven el total en la cabecera `X-Total-Count` (ver spec 00 §4.2).
 
-**Eventos publicados:** `paciente.registrado`, `paciente.estado-cambiado`.
+**Decisiones de diseño:** el documento (tipo + número) es inmutable; no hay `DELETE` (la baja es lógica, `INACTIVO`); inactivar a un paciente impide nuevas citas y pagos pero no cancela las existentes.
+
+**Eventos publicados:** `paciente.registrado`, `paciente.estado-cambiado`. Por privacidad, los eventos **no** llevan documento, nombres ni datos de contacto: solo identificadores y estados.
 
 ## 5.4 `citas-service`
 
-**Entidad `cita`**: `id` (UUID), `codigo` (único, legible, p. ej. `CIT-20261012-0001`), `paciente_id`, `especialidad`, `fecha_hora`, `profesional_codigo`, `motivo`, `estado`, `fecha_creacion`, `fecha_actualizacion`.
+**Entidad `cita`**: `id` (UUID), `codigo` (único, legible, formato `CIT-yyyyMMdd-NNNNNN`, p. ej. `CIT-20261012-000001`, generado con una secuencia), `paciente_id`, `especialidad` (código del catálogo A-08), `fecha_hora`, `profesional_codigo` (formato `AAA-999`, p. ej. `MED-001`), `motivo` (administrativo), `estado`, `fecha_creacion`, `fecha_actualizacion`, `version` (bloqueo optimista).
 
 **Endpoints**
 
@@ -325,11 +331,11 @@ Los listados (`GET` de colecciones) aceptan `pagina` y `tamano` y devuelven el t
 |---|---|---|
 | `POST /api/citas` | `201` cita en `PENDIENTE` | `400` validación; `404`/`422` paciente inexistente o inactivo; `409` choque de agenda; `503`/`504` Pacientes no disponible |
 | `GET /api/citas/{id}` | `200` | `404` |
-| `GET /api/citas?pacienteId=&estado=&fecha=` | `200` `Flux` | — |
-| `PUT /api/citas/{id}/reprogramar` | `200`, estado vuelve a `PENDIENTE` | `400`, `404`, `409` choque, `409` estado no permite reprogramar |
-| `PATCH /api/citas/{id}/estado` `{ "estado": "CONFIRMADA", "motivo": "..." }` | `200` | `404`, `409` transición no permitida |
+| `GET /api/citas?pacienteId=&estado=&especialidad=&profesionalCodigo=&fecha=` | `200` `Flux` paginado | — |
+| `PUT /api/citas/{id}/reprogramar` | `200`, estado vuelve a `PENDIENTE` | `400`, `404`, `409` choque, misma fecha, estado no permite reprogramar o modificación concurrente |
+| `PATCH /api/citas/{id}/estado` `{ "estado": "CONFIRMADA", "motivo": "..." }` | `200`. Destinos admitidos: `CONFIRMADA`, `CANCELADA`, `AUSENTE` | `404`, `409` transición no permitida (incluye pedir `ATENDIDA` o `PENDIENTE`) o modificación concurrente |
 
-Códigos de error de negocio devueltos en el cuerpo (ver §9.3): `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `SERVICIO_PACIENTES_NO_DISPONIBLE`.
+Códigos de error de negocio devueltos en el cuerpo (ver §9.3): `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `CONFLICTO_CONCURRENTE`, `SERVICIO_PACIENTES_NO_DISPONIBLE`.
 
 **Eventos publicados:** `cita.creada`, `cita.confirmada`, `cita.reprogramada`, `cita.cancelada`, `cita.atendida`, `cita.ausente`.
 
@@ -454,7 +460,7 @@ stateDiagram-v2
     [*] --> PENDIENTE: crear
     PENDIENTE --> CONFIRMADA: confirmar
     PENDIENTE --> CANCELADA: cancelar
-    CONFIRMADA --> ATENDIDA: atender
+    CONFIRMADA --> ATENDIDA: atención registrada (evento)
     CONFIRMADA --> AUSENTE: no se presentó
     CONFIRMADA --> CANCELADA: cancelar
     CONFIRMADA --> PENDIENTE: reprogramar
@@ -470,7 +476,7 @@ stateDiagram-v2
 | `CONFIRMADA` | `ATENDIDA`, `AUSENTE`, `CANCELADA`, (reprogramar → `PENDIENTE`) |
 | `ATENDIDA`, `CANCELADA`, `AUSENTE` | Ninguna (estados finales) |
 
-Cualquier otra transición responde `409` con código `TRANSICION_NO_PERMITIDA`. La validación vive en el **dominio** (un tipo con su tabla de transiciones), no en el controlador, para poder probarla de forma unitaria.
+`ATENDIDA` **no** se alcanza por `PATCH`: solo cuando Atenciones publica `atencion.registrada` (un único camino, RN-05/RN-12). Cualquier otra transición responde `409` con código `TRANSICION_NO_PERMITIDA`. La validación vive en el **dominio** (un tipo con su tabla de transiciones), no en el controlador, para poder probarla de forma unitaria.
 
 ## 6.4 Mensajería con RabbitMQ
 
@@ -520,10 +526,13 @@ flowchart LR
   "estadoAnterior": "PENDIENTE",
   "estadoNuevo": "CONFIRMADA",
   "datos": {
-    "codigo": "CIT-20261012-0001",
+    "codigo": "CIT-20261012-000001",
     "pacienteId": "9f2d…",
-    "especialidad": "Medicina General",
-    "fechaHora": "2026-10-15T10:00:00-05:00"
+    "especialidad": "MEDICINA_GENERAL",
+    "especialidadNombre": "Medicina General",
+    "fechaHora": "2026-10-15T10:00:00-05:00",
+    "profesionalCodigo": "MED-001",
+    "motivo": "Confirmada por teléfono"
   }
 }
 ```
@@ -546,6 +555,7 @@ El `datos` lleva todo lo que los consumidores necesitan, así **no tienen que ll
 * **Citas → Pacientes:** una llamada de red que, en modo bloqueante, retendría un hilo por petición durante la espera. Con `WebClient` + `Mono`, el hilo se libera mientras se espera la respuesta; en horas pico se atienden más peticiones concurrentes con pocos hilos.
 * **Acceso a datos:** `R2DBC` evita bloquear hilos del *event loop* de Netty con consultas SQL.
 * **Gateway:** Spring Cloud Gateway es reactivo por diseño; el resto del sistema mantiene el mismo modelo.
+* **Excepción declarada:** el servidor Eureka (Netflix) corre sobre Servlet/Tomcat; es infraestructura de registro, no participa en el procesamiento de peticiones de negocio.
 * **Consumo de eventos:** el procesamiento de mensajes y su persistencia forman una cadena no bloqueante.
 
 **Honestidad técnica.** La programación reactiva no es gratis: complica la depuración y el estilo de código. Se aplica porque el caso de uso (alta concurrencia en horas pico, muchas esperas de E/S) es justamente donde se amortiza.
@@ -599,15 +609,17 @@ CREATE TABLE cita (
   id                  UUID PRIMARY KEY,
   codigo              VARCHAR(30)  NOT NULL UNIQUE,
   paciente_id         UUID         NOT NULL,   -- referencia lógica, SIN FK
-  especialidad        VARCHAR(60)  NOT NULL,
+  especialidad        VARCHAR(30)  NOT NULL,
   fecha_hora          TIMESTAMPTZ  NOT NULL,
   profesional_codigo  VARCHAR(20)  NOT NULL,
   motivo              VARCHAR(200),
   estado              VARCHAR(12)  NOT NULL DEFAULT 'PENDIENTE'
                       CHECK (estado IN ('PENDIENTE','CONFIRMADA','ATENDIDA','CANCELADA','AUSENTE')),
   fecha_creacion      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  fecha_actualizacion TIMESTAMPTZ  NOT NULL DEFAULT now()
+  fecha_actualizacion TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  version             BIGINT       NOT NULL DEFAULT 0   -- bloqueo optimista
 );
+CREATE SEQUENCE cita_codigo_seq;   -- número correlativo del código legible
 -- Un profesional no puede tener dos citas activas a la misma hora
 CREATE UNIQUE INDEX ux_cita_profesional_horario
   ON cita (profesional_codigo, fecha_hora) WHERE estado IN ('PENDIENTE','CONFIRMADA');
@@ -722,13 +734,13 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 | `201` | Recurso creado (con cabecera `Location`) |
 | `400` | Datos inválidos (campos obligatorios, formatos, fecha fuera del horario) |
 | `404` | Recurso inexistente |
-| `409` | Conflicto: duplicado, choque de agenda, transición de estado no permitida |
+| `409` | Conflicto: duplicado, choque de agenda, transición de estado no permitida, modificación concurrente |
 | `422` | Regla de negocio sobre una referencia (paciente inactivo) |
 | `503` / `504` | Dependencia síncrona no disponible / agotó el tiempo |
 
 ## 9.3 Catálogo de códigos de negocio
 
-`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `VALIDACION_FALLIDA`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`.
+`PACIENTE_DUPLICADO`, `PACIENTE_NO_ENCONTRADO`, `PACIENTE_INACTIVO`, `CITA_NO_ENCONTRADA`, `CITA_CHOQUE_AGENDA`, `HORARIO_FUERA_DE_AGENDA`, `TRANSICION_NO_PERMITIDA`, `MISMA_FECHA_HORA`, `CONFLICTO_CONCURRENTE`, `VALIDACION_FALLIDA`, `ERROR_INTERNO`, `SERVICIO_PACIENTES_NO_DISPONIBLE`, `SERVICIO_CITAS_NO_DISPONIBLE`, `SERVICIO_NO_DISPONIBLE` (Gateway), `SERVICIO_TIEMPO_AGOTADO` (Gateway), `RUTA_NO_ENCONTRADA` (Gateway), `ATENCION_NO_ENCONTRADA`, `ATENCION_DUPLICADA`, `CITA_NO_CONFIRMADA`, `PAGO_NO_ENCONTRADO`, `MONTO_INVALIDO`, `OPERACION_DUPLICADA`, `PAGO_YA_ANULADO`.
 
 ## 9.4 Ejemplos de contrato
 
@@ -751,7 +763,7 @@ Todas las respuestas de error usan el formato estándar **RFC 7807** (`applicati
 ```json
 {
   "pacienteId": "9f2d…",
-  "especialidad": "Medicina General",
+  "especialidad": "MEDICINA_GENERAL",
   "fechaHora": "2026-10-15T10:00:00-05:00",
   "profesionalCodigo": "MED-001",
   "motivo": "Control administrativo"
@@ -905,13 +917,14 @@ jobs:
 
 ```bash
 # 1. Infraestructura (PostgreSQL + RabbitMQ)
-cp infra/.env.example infra/.env
+scripts/preparar-entorno.sh          # crea infra/.env con contraseñas aleatorias (no versionado)
 docker compose -f infra/docker-compose.yml up -d
+source scripts/entorno-dev.sh        # exporta variables para los servicios
 
 # 2. Compilar y probar
 ./mvnw verify
 
-# 3. Arrancar, en este orden
+# 3. Arrancar, en este orden (o todo junto: ./mvnw -DskipTests package && scripts/iniciar-todo.sh)
 ./mvnw -pl eureka-server spring-boot:run
 ./mvnw -pl api-gateway spring-boot:run
 ./mvnw -pl pacientes-service spring-boot:run
@@ -938,6 +951,9 @@ docker compose -f infra/docker-compose.yml up -d
 | Aislamiento de BD | Una instancia, una BD por servicio | Instancia por servicio |
 | Observabilidad | Logs y `actuator/health` | Trazas distribuidas (Micrometer Tracing), métricas |
 | Configuración | Variables de entorno | Spring Cloud Config |
+| Tiempos de Eureka | Autopreservación desactivada y latidos de 5 s para que la demostración muestre bajas rápido | Valores por defecto en producción |
+| Exposición de actuator | `/actuator/gateway/routes` expuesto como evidencia | No exponerlo en producción |
+| Paginación | `pagina`/`tamano` con total en `X-Total-Count` | Paginación por cursor para volúmenes grandes |
 | Servicios restantes (Laboratorio, Hospitalización, Farmacia) | Diseñados en §5.8 | Implementarlos con el mismo patrón |
 | Swagger agregado | Una UI por servicio | Agregación de especificaciones en el Gateway |
 | Cargos de facturación | Solo pagos con concepto | Entidad `cargo` separada |
