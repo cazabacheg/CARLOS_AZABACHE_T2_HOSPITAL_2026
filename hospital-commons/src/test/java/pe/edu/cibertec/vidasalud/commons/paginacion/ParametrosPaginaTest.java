@@ -17,7 +17,7 @@ class ParametrosPaginaTest {
     void usaValoresPorDefecto() {
         ParametrosPagina p = ParametrosPagina.de(null, null);
         assertThat(p.pagina()).isZero();
-        assertThat(p.tamano()).isEqualTo(20);
+        assertThat(p.tamano()).isEqualTo(25);
     }
 
     @Test
