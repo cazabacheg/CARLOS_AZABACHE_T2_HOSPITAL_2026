@@ -19,6 +19,13 @@ hospital:
   clientes:
     pacientes:
       url: http://pacientes-service
+  agenda:
+    dias-atencion: "${AGENDA_DIAS_ATENCION:MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY}"
+    hora-inicio: "${AGENDA_HORA_INICIO:08:00}"
+    hora-ultimo-inicio: "${AGENDA_HORA_ULTIMO_INICIO:17:30}"
+    bloque-minutos: 30
+    max-dias-anticipacion: 90
+    plazo-cambio-horas: 24
 eureka:
   client:
     service-url:
