@@ -20,3 +20,18 @@ Generadas el 2026-10-11 con `node scripts/capturar-evidencias.js` (sistema compl
 | `newman-salida.txt` | Salida completa de Newman. |
 | `postgres-salida.txt` | Salida SQL (sin documentos ni correos). |
 | `resumen-pruebas.txt` | Pruebas, fallos y errores por modulo (surefire + failsafe): 455 pruebas, 0 fallos, 0 errores. |
+
+## Integración continua y políticas de rama
+
+| Archivo | Descripción |
+|---|---|
+| `push-directo-rechazado.txt` | Un *push* directo a `main` es rechazado por la política de rama (GH006). |
+| `ci-01-pr-fallo-controlado-rojo.png` | Pull request con la prueba rota a propósito: el CI queda en rojo. |
+| `ci-02-run-fallido.png` | Ejecución fallida de GitHub Actions (`expected: 25 but was: 20`). |
+| `ci-fallo-log.txt` | Extracto del log de la ejecución fallida. |
+| `ci-03-pr-corregido-verde.png` | Pull request tras la corrección: el CI en verde habilita el merge. |
+| `ci-04-run-exitoso.png` | Ejecución exitosa de GitHub Actions. |
+| `ci-exito-log.txt` | Extracto del log de la ejecución exitosa. |
+| `ci-05-actions-historial.png` | Historial de ejecuciones: 1 roja (fallo controlado) y el resto verdes. |
+| `ci-06-pull-requests-fusionados.png` | Pull requests fusionados por el flujo `dev` → `stage` → `main`. |
+| `ci-07-ramas-protegidas.png` | Ramas `main`, `stage` y `dev` protegidas. |
