@@ -1202,3 +1202,31 @@ Con Pacientes caído: el servicio de citas responde `503` y la traza muestra el 
 **A.9 Persistencia SQL con R2DBC y trigger de inmutabilidad de la auditoría**
 
 ![Datos en PostgreSQL](evidencias/09-postgres-persistencia.png)
+
+**A.10 Integración continua con GitHub Actions y políticas de rama**
+
+Repositorio: <https://github.com/cazabacheg/CARLOS_AZABACHE_T2_HOSPITAL_2026>. Las ramas `dev`, `stage` y `main` solo aceptan cambios por *pull request* con el check `build-test` en verde. Un *push* directo a `main` es rechazado:
+
+```text
+$ git push origin fix/test-secuencia-secuencial:main   # intento de push directo a main
+remote: error: GH006: Protected branch update failed for refs/heads/main.        
+remote: 
+remote: - Changes must be made through a pull request.        
+remote: 
+remote: - Required status check "build-test" is expected.        
+To https://github.com/cazabacheg/CARLOS_AZABACHE_T2_HOSPITAL_2026.git
+ ! [remote rejected] fix/test-secuencia-secuencial -> main (protected branch hook declined)
+error: failed to push some refs to 'https://github.com/cazabacheg/CARLOS_AZABACHE_T2_HOSPITAL_2026.git'
+```
+
+Fallo controlado: se cambia a propósito el valor esperado de una prueba en la rama `demo/ci-fallo` y se abre el *pull request* hacia `dev`. El pipeline queda **en rojo** y el *merge* queda bloqueado.
+
+![Pull request con el CI en rojo](evidencias/ci-01-pr-fallo-controlado-rojo.png)
+
+![Ejecución fallida de GitHub Actions](evidencias/ci-02-run-fallido.png)
+
+Corrección: se restaura la prueba en la misma rama; el pipeline vuelve a **verde** y el *merge* se habilita.
+
+![Pull request corregido, CI en verde](evidencias/ci-03-pr-corregido-verde.png)
+
+![Ejecución exitosa de GitHub Actions](evidencias/ci-04-run-exitoso.png)
