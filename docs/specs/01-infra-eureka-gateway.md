@@ -308,12 +308,12 @@ jobs:
 - [ ] `docker compose down -v` y una nueva subida recrean las bases desde cero.
 - [ ] Ningún archivo versionado contiene contraseñas (verificación: `git grep -i "password" -- ':!docs'` solo muestra nombres de variables).
 
-## 9. Decisiones abiertas para revisión
+## 9. Decisiones (todas aprobadas)
 
 | # | Decisión tomada | Alternativa |
 |---|---|---|
-| D-6 | Eureka con autopreservación desactivada y renovación rápida, **solo para la demo** | Valores por defecto de Eureka: la baja de una instancia tarda ~90 s en verse |
-| D-7 | Gateway con filtros propios mínimos (correlación, registro, errores en formato único) | Solo rutas: menos código, pero errores en formato distinto al resto |
-| D-8 | Actuator `gateway` expuesto como evidencia de rutas | No exponerlo y evidenciar solo con peticiones |
-| D-9 | Scripts `iniciar-todo.sh`/`detener-todo.sh` para la demo | Arrancar cada servicio manualmente |
-| D-10 | PostgreSQL en el puerto host 5433, solo en `127.0.0.1` | Puerto 5432 (colisiona con el PostgreSQL nativo) |
+| D-6 | **Aprobado:** Eureka con autopreservación desactivada y renovación rápida, **solo para la demo** | Valores por defecto de Eureka: la baja de una instancia tarda ~90 s en verse |
+| D-7 | **Aprobado:** Gateway con filtros propios mínimos (correlación, registro, errores en formato único) | Solo rutas: menos código, pero errores en formato distinto al resto |
+| D-8 | **Aprobado:** Actuator `gateway` expuesto como evidencia de rutas | No exponerlo y evidenciar solo con peticiones |
+| D-9 | **Aprobado:** Scripts `iniciar-todo.sh`/`detener-todo.sh` para la demo | Arrancar cada servicio manualmente |
+| D-10 | **Aprobado:** PostgreSQL en el puerto host 5433, solo en `127.0.0.1` | Puerto 5432 (colisiona con el PostgreSQL nativo) |
