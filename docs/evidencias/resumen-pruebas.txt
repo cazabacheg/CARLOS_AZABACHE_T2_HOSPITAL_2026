@@ -1,0 +1,15 @@
+Resumen de pruebas (surefire + failsafe, ./mvnw verify)
+
+Modulo                   Pruebas   Fallos Errores Omitidas
+------------------------------------------------------------------------------------------
+api-gateway                    6        0       0        0   (unit 6, IT 0)
+atenciones-service            61        0       0        0   (unit 54, IT 7)
+auditoria-service             48        0       0        0   (unit 34, IT 14)
+citas-service                105        0       0        0   (unit 91, IT 14)
+eureka-server                  3        0       0        0   (unit 3, IT 0)
+hospital-commons              35        0       0        0   (unit 28, IT 7)
+notificaciones-service        45        0       0        0   (unit 36, IT 9)
+pacientes-service             72        0       0        0   (unit 56, IT 16)
+pagos-service                 80        0       0        0   (unit 68, IT 12)
+------------------------------------------------------------------------------------------
+TOTAL                        455        0       0        0   (unit 376, IT 79)

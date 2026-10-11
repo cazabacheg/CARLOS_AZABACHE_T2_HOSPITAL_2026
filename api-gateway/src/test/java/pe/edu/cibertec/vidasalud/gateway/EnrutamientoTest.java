@@ -86,6 +86,15 @@ class EnrutamientoTest {
     }
 
     @Test
+    void elEndpointDeActuatorListaLasRutasConfiguradas() {
+        cliente.get().uri("/actuator/gateway/routes").exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.length()").isEqualTo(2)
+                .jsonPath("$[?(@.route_id=='pacientes')]").exists();
+    }
+
+    @Test
     void sinAgenteNoAgregaXTraceId() {
         destino.enqueue(new MockResponse().setBody("ok"));
         cliente.get().uri("/api/pacientes/9").exchange()

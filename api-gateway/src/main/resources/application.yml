@@ -46,6 +46,8 @@ management:
   endpoint:
     health:
       show-details: always
+    gateway:
+      access: unrestricted   # evidencia de rutas; solo desarrollo
 logging:
   pattern:
     level: "%5p [${spring.application.name:},%X{trace_id:-},%X{span_id:-}]"

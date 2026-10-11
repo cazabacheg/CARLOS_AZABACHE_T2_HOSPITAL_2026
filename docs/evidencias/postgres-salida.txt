@@ -1,0 +1,106 @@
+Evidencia de persistencia (PostgreSQL 2026-10-11T18:33:21.283Z)
+
+===== pacientes_db.paciente =====
+ total_paciente 
+----------------
+             11
+(1 row)
+
+                  id                  |  estado  | fecha_nacimiento |        fecha_registro         
+--------------------------------------+----------+------------------+-------------------------------
+ 42e6925e-6f01-4349-9e61-9098c6df33c4 | INACTIVO | 1980-03-10       | 2026-10-11 18:31:39.712037+00
+ 0757d8c1-7113-4acd-943f-bf272ec1c939 | ACTIVO   | 1990-05-20       | 2026-10-11 18:31:38.129702+00
+ 17a13a9e-fbe6-4771-ad01-df2eb67df1cf | INACTIVO | 1980-03-10       | 2026-10-11 18:29:25.541952+00
+(3 rows)
+
+
+===== citas_db.cita =====
+ total_cita 
+------------
+         14
+(1 row)
+
+                  id                  |       codigo        |   estado   |   especialidad   | profesional_codigo |       fecha_hora       
+--------------------------------------+---------------------+------------+------------------+--------------------+------------------------
+ 9168830a-1b49-47bb-8373-dc5d70bdd7a5 | CIT-20261011-000014 | CONFIRMADA | PEDIATRIA        | PED-971            | 2026-10-16 20:00:00+00
+ c7247417-a108-47a8-8a9b-db8897e46f47 | CIT-20261011-000013 | CANCELADA  | CARDIOLOGIA      | MED-825            | 2026-10-11 19:00:00+00
+ 0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84 | CIT-20261011-000012 | CANCELADA  | MEDICINA_GENERAL | MED-890            | 2026-10-15 16:30:00+00
+ 4a969c62-b7d0-4198-b969-5e31ac191e73 | CIT-20261011-000011 | CONFIRMADA | PEDIATRIA        | PED-964            | 2026-10-16 20:00:00+00
+ 52681367-47a9-4b35-b049-3b5d455c9db7 | CIT-20261011-000010 | CONFIRMADA | CARDIOLOGIA      | MED-153            | 2026-10-11 19:00:00+00
+(5 rows)
+
+
+===== atenciones_db.atencion =====
+ total_atencion 
+----------------
+              4
+(1 row)
+
+                  id                  |       codigo        | estado  |       area       |        fecha_atencion         
+--------------------------------------+---------------------+---------+------------------+-------------------------------
+ c96e74f5-c74f-4c8d-90fb-1741dea9f8d0 | ATE-20261011-000004 | ANULADA | CONSULTA_EXTERNA | 2026-10-11 18:31:43.660284+00
+ b02d6cba-44f4-41a2-bb2c-12e6daff603b | ATE-20261011-000003 | ANULADA | CONSULTA_EXTERNA | 2026-10-11 18:26:48.69307+00
+ 839f4af9-c63e-4c16-972c-4cf8b4f1ab6c | ATE-20261011-000002 | ANULADA | CONSULTA_EXTERNA | 2026-10-11 18:25:00.538501+00
+ 84f23f90-73a7-4bc0-bac2-4f5b5fe22a37 | ATE-20261011-000001 | ANULADA | CONSULTA_EXTERNA | 2026-10-11 18:21:24.355715+00
+(4 rows)
+
+
+===== pagos_db.pago =====
+ total_pago 
+------------
+          5
+(1 row)
+
+                  id                  | estado  | moneda | monto | medio_pago |          fecha_pago           
+--------------------------------------+---------+--------+-------+------------+-------------------------------
+ 1c53264f-1c24-4c45-b524-db5e86eda398 | ANULADO | PEN    | 80.00 | TARJETA    | 2026-10-11 18:31:46.28559+00
+ 1df8a0cd-71aa-416e-9c8c-e2fdb5239be1 | ANULADO | PEN    | 80.00 | TARJETA    | 2026-10-11 18:29:32.093564+00
+ 82067718-0128-4e58-b94f-b177ddf43f77 | ANULADO | PEN    | 80.00 | TARJETA    | 2026-10-11 18:26:51.354715+00
+ f70da198-ab10-40e8-ae9c-f10fcb229842 | ANULADO | PEN    | 80.00 | TARJETA    | 2026-10-11 18:25:03.199719+00
+ 03d9bb3f-2afa-4d43-98d9-d53dbf833741 | ANULADO | PEN    | 80.00 | TARJETA    | 2026-10-11 18:21:27.896653+00
+(5 rows)
+
+
+===== notificaciones_db.notificacion =====
+ total_notificacion 
+--------------------
+                 66
+(1 row)
+
+                  id                  |   tipo_evento   |  canal   |          fecha_envio          
+--------------------------------------+-----------------+----------+-------------------------------
+ 2cb34b65-df39-445d-bfa0-0b40b3e1381b | cita.confirmada | SIMULADO | 2026-10-11 18:32:07.239634+00
+ 3257dc6a-5331-4cc0-830d-bea26d017d45 | cita.creada     | SIMULADO | 2026-10-11 18:31:54.765295+00
+ e9d1316a-7cda-4606-8d06-70274219a37c | pago.anulado    | SIMULADO | 2026-10-11 18:31:47.917408+00
+ 99506cc4-dabe-4380-b686-a06eff584f65 | pago.registrado | SIMULADO | 2026-10-11 18:31:46.295611+00
+ 67d60489-c7bf-44bc-b885-85da8f82fc16 | cita.cancelada  | SIMULADO | 2026-10-11 18:31:46.104548+00
+(5 rows)
+
+
+===== auditoria_db.evento_auditoria =====
+ total_evento_auditoria 
+------------------------
+                     79
+(1 row)
+
+                  id                  |   tipo_evento   | tipo_recurso | estado_anterior | estado_nuevo |         fecha_evento          
+--------------------------------------+-----------------+--------------+-----------------+--------------+-------------------------------
+ 09be61da-bda7-4c1c-ac1a-0fda74f5c8f4 | cita.confirmada | CITA         | PENDIENTE       | CONFIRMADA   | 2026-10-11 18:32:07.235686+00
+ e48105bc-5c62-4c61-911b-670437595fc4 | cita.creada     | CITA         |                 | PENDIENTE    | 2026-10-11 18:31:54.760588+00
+ 088e508c-2cd8-48b7-a143-1fb7f0aeb9c1 | pago.anulado    | PAGO         | REGISTRADO      | ANULADO      | 2026-10-11 18:31:47.913252+00
+ 26af1a5c-39eb-4111-9c55-a49140d02cd8 | pago.registrado | PAGO         |                 | REGISTRADO   | 2026-10-11 18:31:46.291256+00
+ 00ac80ae-dd26-4642-912d-c87b2226b30e | cita.cancelada  | CITA         | ATENDIDA        | CANCELADA    | 2026-10-11 18:31:46.098765+00
+(5 rows)
+
+
+===== Trigger de inmutabilidad (auditoria_db.evento_auditoria) =====
+$ UPDATE evento_auditoria SET estado_nuevo='X';
+ERROR:  evento_auditoria es inmutable: UPDATE no permitido
+CONTEXT:  PL/pgSQL function fn_auditoria_inmutable() line 1 at RAISE
+
+$ SELECT count(*) FROM evento_auditoria WHERE estado_nuevo = 'X';  -- debe ser 0
+ count 
+-------
+     0
+(1 row)
+

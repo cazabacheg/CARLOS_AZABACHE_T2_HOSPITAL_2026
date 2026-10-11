@@ -1,0 +1,261 @@
+newman
+
+Hospital Vida Salud - flujo funcional (T2)
+
+❏ 01 Pacientes
+↳ Registrar paciente (valido)
+  POST http://localhost:8080/api/pacientes [201 Created, 508B, 341ms]
+  ✓  Estado 201
+  ✓  Location presente
+
+↳ Consultar paciente por id
+  GET http://localhost:8080/api/pacientes/0757d8c1-7113-4acd-943f-bf272ec1c939 [200 OK, 440B, 23ms]
+  ✓  Estado 200
+  ✓  mismo id
+
+↳ Registrar paciente DUPLICADO (rechazo 409)
+  POST http://localhost:8080/api/pacientes [409 Conflict, 359B, 26ms]
+  ✓  Estado 409
+  ✓  codigo = PACIENTE_DUPLICADO
+
+↳ Registrar paciente con datos invalidos (400)
+  POST http://localhost:8080/api/pacientes [400 Bad Request, 611B, 21ms]
+  ✓  Estado 400
+  ✓  codigo = VALIDACION_FALLIDA
+  ✓  lista de errores
+
+↳ Consultar paciente inexistente (404)
+  GET http://localhost:8080/api/pacientes/00000000-0000-4000-8000-000000000000 [404 Not Found, 412B, 15ms]
+  ✓  Estado 404
+  ✓  codigo = PACIENTE_NO_ENCONTRADO
+
+↳ Listar pacientes (paginado)
+  GET http://localhost:8080/api/pacientes?pagina=0&tamano=5 [200 OK, 1.75kB, 22ms]
+  ✓  Estado 200
+  ✓  X-Total-Count presente
+
+↳ Actualizar datos de contacto
+  PUT http://localhost:8080/api/pacientes/0757d8c1-7113-4acd-943f-bf272ec1c939 [200 OK, 439B, 48ms]
+  ✓  Estado 200
+
+↳ Registrar segundo paciente (para el caso inactivo)
+  POST http://localhost:8080/api/pacientes [201 Created, 477B, 34ms]
+  ✓  Estado 201
+
+↳ Inactivar segundo paciente
+  PATCH http://localhost:8080/api/pacientes/42e6925e-6f01-4349-9e61-9098c6df33c4/estado [200 OK, 411B, 39ms]
+  ✓  Estado 200
+
+↳ Inactivar de nuevo (409 transicion no permitida)
+  PATCH http://localhost:8080/api/pacientes/42e6925e-6f01-4349-9e61-9098c6df33c4/estado [409 Conflict, 386B, 15ms]
+  ✓  Estado 409
+  ✓  codigo = TRANSICION_NO_PERMITIDA
+
+❏ 02 Citas
+↳ Registrar cita (paciente valido) -> PENDIENTE
+  POST http://localhost:8080/api/citas [201 Created, 616B, 44ms]
+  ✓  Estado 201
+  ✓  estado PENDIENTE
+  ✓  codigo CIT-
+  ✓  X-Trace-Id (con agente OTel)
+
+↳ Consultar cita
+  GET http://localhost:8080/api/citas/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84 [200 OK, 552B, 11ms]
+  ✓  Estado 200
+
+↳ Choque de agenda: mismo profesional y hora (409)
+  POST http://localhost:8080/api/citas [409 Conflict, 359B, 23ms]
+  ✓  Estado 409
+  ✓  codigo = CITA_CHOQUE_AGENDA
+
+↳ Cita para paciente inexistente (404)
+  POST http://localhost:8080/api/citas [404 Not Found, 371B, 19ms]
+  ✓  Estado 404
+  ✓  codigo = PACIENTE_NO_ENCONTRADO
+
+↳ Cita para paciente INACTIVO (422)
+  POST http://localhost:8080/api/citas [422 Unprocessable Entity, 385B, 18ms]
+  ✓  Estado 422
+  ✓  codigo = PACIENTE_INACTIVO
+
+↳ Cita en horario invalido (400)
+  POST http://localhost:8080/api/citas [400 Bad Request, 365B, 8ms]
+  ✓  Estado 400
+  ✓  codigo = HORARIO_FUERA_DE_AGENDA
+
+↳ Listar citas del paciente
+  GET http://localhost:8080/api/citas?pacienteId=0757d8c1-7113-4acd-943f-bf272ec1c939 [200 OK, 579B, 15ms]
+  ✓  Estado 200
+
+↳ Confirmar cita -> evento cita.confirmada
+  PATCH http://localhost:8080/api/citas/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84/estado [200 OK, 553B, 31ms]
+  ✓  Estado 200
+  ✓  CONFIRMADA
+
+↳ Transicion no permitida: confirmar de nuevo (409)
+  PATCH http://localhost:8080/api/citas/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84/estado [409 Conflict, 406B, 12ms]
+  ✓  Estado 409
+  ✓  codigo = TRANSICION_NO_PERMITIDA
+
+↳ ATENDIDA no se pone por PATCH (409)
+  PATCH http://localhost:8080/api/citas/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84/estado [409 Conflict, 408B, 12ms]
+  ✓  Estado 409
+  ✓  codigo = TRANSICION_NO_PERMITIDA
+
+↳ Reprogramar cita -> vuelve a PENDIENTE
+  PUT http://localhost:8080/api/citas/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84/reprogramar [200 OK, 552B, 34ms]
+  ✓  Estado 200
+  ✓  PENDIENTE
+
+↳ Cancelar cita (mas de 24 h de anticipacion)
+  PATCH http://localhost:8080/api/citas/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84/estado [200 OK, 552B, 29ms]
+  ✓  Estado 200
+
+↳ Confirmar una cita CANCELADA (409, RN-05)
+  PATCH http://localhost:8080/api/citas/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84/estado [409 Conflict, 405B, 13ms]
+  ✓  Estado 409
+  ✓  codigo = TRANSICION_NO_PERMITIDA
+
+↳ Cita inexistente (404)
+  GET http://localhost:8080/api/citas/00000000-0000-4000-8000-000000000000 [404 Not Found, 400B, 11ms]
+  ✓  Estado 404
+  ✓  codigo = CITA_NO_ENCONTRADA
+
+❏ 03 Atenciones
+↳ Crear cita proxima (empieza en <= 30 min)
+  POST http://localhost:8080/api/citas [201 Created, 587B, 39ms]
+  ✓  Estado 201
+
+↳ Atencion sobre cita PENDIENTE (409 CITA_NO_CONFIRMADA)
+  POST http://localhost:8080/api/atenciones [409 Conflict, 385B, 17ms]
+  ✓  Estado 409
+  ✓  codigo = CITA_NO_CONFIRMADA
+
+↳ Confirmar la cita proxima
+  PATCH http://localhost:8080/api/citas/c7247417-a108-47a8-8a9b-db8897e46f47/estado [200 OK, 524B, 27ms]
+  ✓  Estado 200
+
+↳ Atencion fuera de ventana: cita lejana (409)
+  POST http://localhost:8080/api/atenciones [409 Conflict, 385B, 16ms]
+  ✓  Estado 409
+  ✓  codigo valido
+
+↳ Registrar atencion -> evento atencion.registrada
+  POST http://localhost:8080/api/atenciones [201 Created, 610B, 44ms]
+  ✓  Estado 201
+  ✓  REGISTRADA
+
+↳ Atencion duplicada (409)
+  POST http://localhost:8080/api/atenciones [409 Conflict, 384B, 16ms]
+  ✓  Estado 409
+  ✓  codigo valido
+
+↳ La cita paso a ATENDIDA (consistencia eventual)
+  GET http://localhost:8080/api/citas/c7247417-a108-47a8-8a9b-db8897e46f47 [200 OK, 522B, 10ms]
+  ✓  Estado 200
+  ✓  ATENDIDA
+
+↳ Consultar atencion
+  GET http://localhost:8080/api/atenciones/c96e74f5-c74f-4c8d-90fb-1741dea9f8d0 [200 OK, 532B, 12ms]
+  ✓  Estado 200
+
+↳ Listar atenciones del paciente
+  GET http://localhost:8080/api/atenciones?pacienteId=0757d8c1-7113-4acd-943f-bf272ec1c939 [200 OK, 559B, 15ms]
+  ✓  Estado 200
+
+↳ Anular atencion (cita aun no ocurrida -> cita CANCELADA)
+  PATCH http://localhost:8080/api/atenciones/c96e74f5-c74f-4c8d-90fb-1741dea9f8d0/estado [200 OK, 532B, 28ms]
+  ✓  Estado 200
+
+❏ 04 Pagos
+↳ Registrar pago (monto valido)
+  POST http://localhost:8080/api/pagos [201 Created, 611B, 42ms]
+  ✓  Estado 201
+  ✓  numero OP-
+
+↳ REINTENTO con la misma Idempotency-Key (mismo pago, sin duplicar)
+  POST http://localhost:8080/api/pagos [201 Created, 638B, 14ms]
+  ✓  Estado 201
+  ✓  mismo pago
+  ✓  Idempotent-Replayed
+
+↳ Misma clave con OTRO monto (422)
+  POST http://localhost:8080/api/pagos [422 Unprocessable Entity, 403B, 13ms]
+  ✓  Estado 422
+  ✓  codigo = CLAVE_IDEMPOTENCIA_REUTILIZADA
+
+↳ Sin cabecera Idempotency-Key (400)
+  POST http://localhost:8080/api/pagos [400 Bad Request, 413B, 10ms]
+  ✓  Estado 400
+  ✓  codigo = CLAVE_IDEMPOTENCIA_REQUERIDA
+
+↳ Monto 0 (400 MONTO_INVALIDO)
+  POST http://localhost:8080/api/pagos [400 Bad Request, 344B, 8ms]
+  ✓  Estado 400
+  ✓  codigo = MONTO_INVALIDO
+
+↳ Monto negativo (400 MONTO_INVALIDO)
+  POST http://localhost:8080/api/pagos [400 Bad Request, 344B, 8ms]
+  ✓  Estado 400
+  ✓  codigo = MONTO_INVALIDO
+
+↳ Pago para paciente inexistente (404)
+  POST http://localhost:8080/api/pagos [404 Not Found, 371B, 23ms]
+  ✓  Estado 404
+  ✓  codigo = PACIENTE_NO_ENCONTRADO
+
+↳ Consultar pago
+  GET http://localhost:8080/api/pagos/1c53264f-1c24-4c45-b524-db5e86eda398 [200 OK, 547B, 14ms]
+  ✓  Estado 200
+
+↳ Listar pagos del paciente
+  GET http://localhost:8080/api/pagos?pacienteId=0757d8c1-7113-4acd-943f-bf272ec1c939 [200 OK, 574B, 17ms]
+  ✓  Estado 200
+
+↳ Anular pago
+  PATCH http://localhost:8080/api/pagos/1c53264f-1c24-4c45-b524-db5e86eda398/anular [200 OK, 568B, 35ms]
+  ✓  Estado 200
+
+↳ Anular de nuevo (409 PAGO_YA_ANULADO)
+  PATCH http://localhost:8080/api/pagos/1c53264f-1c24-4c45-b524-db5e86eda398/anular [409 Conflict, 367B, 16ms]
+  ✓  Estado 409
+  ✓  codigo = PAGO_YA_ANULADO
+
+❏ 05 Notificaciones y Auditoria
+↳ Notificaciones del paciente (RabbitMQ -> Notificaciones)
+  GET http://localhost:8080/api/notificaciones?pacienteId=0757d8c1-7113-4acd-943f-bf272ec1c939 [200 OK, 4.57kB, 18ms]
+  ✓  Estado 200
+  ✓  hay notificaciones
+
+↳ Historial de auditoria de la cita (estados y origen)
+  GET http://localhost:8080/api/auditoria/recursos/CITA/0bd04e7d-71ba-445b-a9f9-0b2b71f4ff84/historial [200 OK, 1.63kB, 12ms]
+  ✓  Estado 200
+  ✓  hay eventos
+
+↳ Historial de auditoria del paciente
+  GET http://localhost:8080/api/auditoria/recursos/PACIENTE/0757d8c1-7113-4acd-943f-bf272ec1c939/historial [200 OK, 506B, 11ms]
+  ✓  Estado 200
+
+↳ Auditoria filtrada por tipo de evento
+  GET http://localhost:8080/api/auditoria?tipoEvento=cita.confirmada&pagina=0&tamano=5 [200 OK, 2.04kB, 17ms]
+  ✓  Estado 200
+
+┌─────────────────────────┬───────────────────┬──────────────────┐
+│                         │          executed │           failed │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│              iterations │                 1 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│                requests │                49 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│            test-scripts │                49 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│      prerequest-scripts │                 7 │                0 │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│              assertions │                86 │                0 │
+├─────────────────────────┴───────────────────┴──────────────────┤
+│ total run duration: 10.9s                                      │
+├────────────────────────────────────────────────────────────────┤
+│ total data received: 24.47kB (approx)                          │
+├────────────────────────────────────────────────────────────────┤
+│ average response time: 27ms [min: 8ms, max: 341ms, s.d.: 46ms] │
+└────────────────────────────────────────────────────────────────┘
