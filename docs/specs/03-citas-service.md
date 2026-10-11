@@ -127,7 +127,7 @@ Garantizadas por los **índices únicos parciales** del documento §8.2 (`ux_cit
 * Método `Mono<PacienteResumen> obtener(UUID pacienteId)` → `GET /api/pacientes/{id}`.
 * `PacienteResumen` es un `record(UUID id, String estado)` **propio de Citas** con `@JsonIgnoreProperties(ignoreUnknown = true)`: el contrato depende solo de `id` y `estado`.
 * Aplica `PoliticaResiliencia` (timeout 2 s, 1 reintento solo en errores de red; spec 00 §5.3).
-* Propaga la cabecera `X-Request-Id` si existe en el contexto de la petición entrante (Reactor `Context`).
+* La traza (`traceparent`) la propaga el agente OpenTelemetry automáticamente (spec 08).
 
 | Respuesta de Pacientes | Resultado |
 |---|---|

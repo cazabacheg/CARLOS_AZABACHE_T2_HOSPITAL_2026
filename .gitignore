@@ -29,3 +29,7 @@ Thumbs.db
 
 # Archivos generados de documentación
 docs/build/
+
+# Ejecución local
+logs/
+tools/

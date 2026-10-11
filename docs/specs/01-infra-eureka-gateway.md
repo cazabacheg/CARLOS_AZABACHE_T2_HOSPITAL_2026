@@ -11,6 +11,7 @@
 4. `api-gateway`.
 5. Workflow de CI (`.github/workflows/ci.yml`).
 6. Scripts de apoyo (`scripts/`).
+7. Observabilidad: contenedores Jaeger y Seq, y arranque con el agente OTel (detalle en la spec 08).
 
 `hospital-commons` y los servicios de negocio se especifican en las specs 00 y 02–07.
 
@@ -74,9 +75,28 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+  # Observabilidad (spec 08)
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    container_name: hvs-jaeger
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+  seq:
+    image: datalust/seq:2026.1.17114
+    container_name: hvs-seq
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:8090:80"
+      - "127.0.0.1:5341:5341"
+    volumes:
+      - hvs-seqdata:/data
 volumes:
   hvs-pgdata:
   hvs-rabbitdata:
+  hvs-seqdata:
 ```
 
 * Los puertos solo escuchan en `127.0.0.1` (no se exponen a la red local).
@@ -108,6 +128,7 @@ NOTIFICACIONES_DB_PASSWORD=cambiar-esto
 AUDITORIA_DB_PASSWORD=cambiar-esto
 RABBIT_USER=hospital
 RABBIT_PASSWORD=cambiar-esto
+SEQ_ADMIN_PASSWORD=cambiar-esto
 ```
 
 El `.env` real lo genera `scripts/preparar-entorno.sh` con contraseñas aleatorias (`openssl rand -hex 16`) si no existe; está en `.gitignore`.
@@ -214,7 +235,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,gateway
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{trace_id:-},%X{span_id:-}]"
 ```
 
 * **Sin `discovery.locator.enabled`**: las rutas son explícitas (documento §5.2); si un servicio se registra en Eureka, **no** queda expuesto automáticamente.
@@ -226,8 +253,8 @@ management:
 
 | Clase | Qué hace |
 |---|---|
-| `IdCorrelacionFilter` (`GlobalFilter`, orden alto) | Si la petición trae `X-Request-Id` lo conserva; si no, genera un UUID y lo agrega **a la petición reenviada y a la respuesta**. Así se puede seguir una petición entre servicios en los logs |
-| `RegistroPeticionesFilter` (`GlobalFilter`) | Al terminar, registra `INFO`: método, ruta (sin parámetros de consulta), estado HTTP, milisegundos e `X-Request-Id`. **No** registra cabeceras ni cuerpos |
+| `TraceIdRespuestaFilter` (`WebFilter`) | Copia de la de `hospital-commons` (spec 08 §5): agrega `X-Trace-Id` a la respuesta con el `traceId` de OpenTelemetry. La propagación entre servicios (`traceparent`) la hace el agente OTel; no hay correlación casera |
+| `RegistroPeticionesFilter` (`GlobalFilter`) | Al terminar, registra `INFO`: método, ruta (sin parámetros de consulta), estado HTTP y milisegundos (el `trace_id` va en el patrón de log). **No** registra cabeceras ni cuerpos |
 | `ManejadorErroresGateway` (`ErrorWebExceptionHandler`, `@Order(-2)`) | Convierte los errores del Gateway al formato `application/problem+json` de la spec 00 §4.1: sin instancia disponible (`503`) → `codigo=SERVICIO_NO_DISPONIBLE`; tiempo de espera agotado (`504`) → `SERVICIO_TIEMPO_AGOTADO`; ruta inexistente (`404`) → `RUTA_NO_ENCONTRADA`. Sin stack trace |
 
 El Gateway no valida autenticación (mejora documentada §14 del documento técnico).
@@ -240,7 +267,6 @@ Sin necesidad de Eureka ni de los servicios reales:
 |---|---|
 | `RutasConfiguradasTest` | Carga `RouteDefinitionLocator` y comprueba que existen **6 rutas**, cada una con URI `lb://<servicio>` y predicado `Path` correcto |
 | `EnrutamientoTest` | `@SpringBootTest(RANDOM_PORT)` con `eureka.client.enabled=false` y las rutas sobreescritas (por `@DynamicPropertySource`) para apuntar a un `MockWebServer`: `GET /api/pacientes/123` llega a `/api/pacientes/123` del mock; el cuerpo y el estado vuelven intactos |
-| `IdCorrelacionTest` | Sin cabecera → la respuesta trae `X-Request-Id` (UUID); con cabecera → se conserva el mismo valor y llega al mock |
 | `ErrorSinInstanciaTest` | Ruta a un servicio inexistente → `503` con `application/problem+json` y `codigo=SERVICIO_NO_DISPONIBLE` |
 | `RutaInexistenteTest` | `GET /api/otra-cosa` → `404 RUTA_NO_ENCONTRADA` |
 
@@ -291,15 +317,16 @@ jobs:
 |---|---|
 | `preparar-entorno.sh` | Si no existe `infra/.env`, lo crea desde `.env.example` con contraseñas aleatorias. Nunca sobrescribe uno existente. Imprime solo "creado"/"ya existe", **sin mostrar** contraseñas |
 | `entorno-dev.sh` | Debe usarse con `source`. Carga `infra/.env` y exporta las variables que esperan los servicios (`PACIENTES_DB_PASSWORD`, …, `RABBIT_USER`, `RABBIT_PASSWORD`, `DB_HOST`, `DB_PORT`) |
-| `iniciar-todo.sh` | Con la infraestructura arriba y el proyecto compilado (`./mvnw -DskipTests package`), arranca en este orden, esperando salud de cada uno (`/actuator/health`): Eureka → Gateway → pacientes → citas → atenciones → pagos → notificaciones → auditoría. Cada uno en segundo plano con `java -jar`, salida en `logs/<servicio>.log`, PID en `logs/<servicio>.pid` |
+| `descargar-otel-agent.sh` | Descarga el agente OpenTelemetry 2.31.1 a `tools/` (ignorado por git) y verifica su SHA-256 fijado (spec 08 §6) |
+| `iniciar-todo.sh` | Con la infraestructura arriba y el proyecto compilado (`./mvnw -DskipTests package`), arranca en este orden, esperando salud de cada uno (`/actuator/health`): Eureka → Gateway → pacientes → citas → atenciones → pagos → notificaciones → auditoría. Cada uno en segundo plano con `java -javaagent:tools/opentelemetry-javaagent-2.31.1.jar -jar` y las variables `OTEL_*` de la spec 08 §4 (sin el agente, arranca igual y avisa); salida en `logs/<servicio>.log`, PID en `logs/<servicio>.pid` |
 | `detener-todo.sh` | Detiene los procesos de los PID guardados (SIGTERM), en orden inverso |
 
-`logs/` está en `.gitignore`. Estos scripts no son parte de la evaluación pero facilitan la demostración y la reproducción.
+`logs/` y `tools/` están en `.gitignore`. Estos scripts no son parte de la evaluación pero facilitan la demostración y la reproducción.
 
 ## 8. Criterios de aceptación
 
 - [ ] `./mvnw --batch-mode verify` pasa en la raíz con los módulos existentes en ese momento.
-- [ ] `scripts/preparar-entorno.sh && docker compose -f infra/docker-compose.yml up -d` deja `hvs-postgres` y `hvs-rabbitmq` en estado `healthy`.
+- [ ] `scripts/preparar-entorno.sh && docker compose -f infra/docker-compose.yml up -d` deja `hvs-postgres` y `hvs-rabbitmq` en estado `healthy`, y `hvs-jaeger` y `hvs-seq` en ejecución.
 - [ ] Desde el host: `psql -h 127.0.0.1 -p 5433 -U pacientes_user pacientes_db` conecta; con la misma credencial a `citas_db` **falla** por falta de `CONNECT`.
 - [ ] Panel RabbitMQ en `http://localhost:15672` accesible con el usuario del `.env`.
 - [ ] Panel Eureka en `http://localhost:8761` muestra `API-GATEWAY` al arrancar el Gateway.
@@ -314,7 +341,7 @@ jobs:
 | # | Decisión tomada | Alternativa |
 |---|---|---|
 | D-6 | **Aprobado:** Eureka con autopreservación desactivada y renovación rápida, **solo para la demo** | Valores por defecto de Eureka: la baja de una instancia tarda ~90 s en verse |
-| D-7 | **Aprobado:** Gateway con filtros propios mínimos (correlación, registro, errores en formato único) | Solo rutas: menos código, pero errores en formato distinto al resto |
+| D-7 | **Aprobado:** Gateway con filtros propios mínimos (`X-Trace-Id`, registro, errores en formato único; la correlación la hace OTel, spec 08) | Solo rutas: menos código, pero errores en formato distinto al resto |
 | D-8 | **Aprobado:** Actuator `gateway` expuesto como evidencia de rutas | No exponerlo y evidenciar solo con peticiones |
 | D-9 | **Aprobado:** Scripts `iniciar-todo.sh`/`detener-todo.sh` para la demo | Arrancar cada servicio manualmente |
 | D-10 | **Aprobado:** PostgreSQL en el puerto host 5433, solo en `127.0.0.1` | Puerto 5432 (colisiona con el PostgreSQL nativo) |

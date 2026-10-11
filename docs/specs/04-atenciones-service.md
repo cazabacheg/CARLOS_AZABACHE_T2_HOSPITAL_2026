@@ -72,7 +72,7 @@ Métodos de dominio:
 
 Mismo patrón que `PacientesClient` (spec 03 §4):
 
-* `@LoadBalanced WebClient`, `baseUrl = http://citas-service`, `PoliticaResiliencia`, propagación de `X-Request-Id`.
+* `@LoadBalanced WebClient`, `baseUrl = http://citas-service`, `PoliticaResiliencia`; la traza la propaga el agente OTel (spec 08).
 * `Mono<CitaResumen> obtener(UUID citaId)` → `GET /api/citas/{id}`.
 * `CitaResumen(UUID id, UUID pacienteId, String estado, OffsetDateTime fechaHora)` propio, tolerante a campos desconocidos.
 

@@ -38,6 +38,7 @@ El enunciado permite justificar la profundidad de cada servicio. Esta es la deci
 | **Pagos** | Implementado | Pagos simulados con validación de monto y de número de operación único |
 | **Notificaciones** | Implementado | Consumidor de eventos, persiste notificaciones simuladas. Eventos de cita y paciente: prioridad normal. Eventos de atención y pago: **prioridad baja, al final** |
 | **Auditoría** | Implementado | Consumidor de eventos, persiste trazabilidad |
+| Observabilidad (no exigida por el enunciado) | Implementado | Trazas distribuidas en Jaeger y logs centralizados en Seq con OpenTelemetry (§7.4) |
 | Laboratorio, Hospitalización, Farmacia | Diseño referencial (§5.8) | No implementados; el modelo de eventos los admite sin cambios |
 
 **Justificación.** El enunciado exige "un flujo funcional de extremo a extremo" y declara que no es obligatorio implementar todos los servicios con la misma profundidad (§16). Se implementan seis servicios de negocio y de soporte más Eureka y Gateway, cubriendo el flujo completo del §27 (paciente → cita → confirmación → evento → atención) y la regla de pagos del §24; Laboratorio es opcional en el propio enunciado. El enunciado advierte que no se evaluará favorablemente una división artificial (§26, Actividad 6): cada servicio tiene un dueño de datos y reglas propias.
@@ -190,9 +191,12 @@ flowchart TB
     MQ -->|"notificaciones.cola"| NO
     MQ -->|"auditoria.cola"| AU
     MQ -->|"citas.atenciones.cola"| CI
+    OBS["Observabilidad (OpenTelemetry)<br/>Jaeger: trazas · Seq: logs"]
+    GW -. "OTLP" .-> OBS
+    CI -. "OTLP (todos los servicios)" .-> OBS
 ```
 
-*Todas las bases residen en una instancia PostgreSQL con acceso mediante R2DBC; cada servicio solo tiene credenciales para la suya.*
+*Todas las bases residen en una instancia PostgreSQL con acceso mediante R2DBC; cada servicio solo tiene credenciales para la suya. Todos los servicios envían trazas y logs por OTLP (§7.4); por claridad se dibujan solo dos flechas.*
 
 ## 4.2 Por qué los clientes no deben depender de los puertos internos
 
@@ -598,7 +602,24 @@ La cadena es reactiva **de extremo a extremo**: controlador (`WebFlux`) → serv
 * Prohibido JDBC y JPA/Hibernate (el enunciado marca R2DBC como excluyente).
 * Los errores de negocio se modelan como excepciones de dominio traducidas a respuestas HTTP por un *handler* global reactivo.
 * Las migraciones de esquema (SQL de creación) se ejecutan al arrancar con un inicializador de R2DBC o un script de init; se evita Flyway/Liquibase porque requieren JDBC.
-* La publicación a RabbitMQ usa el cliente reactivo (`reactor-rabbitmq`) o, de forma pragmática, `RabbitTemplate` ejecutado en un *scheduler* elástico; la decisión se registra en la especificación del servicio.
+* La publicación y el consumo de RabbitMQ usan el cliente reactivo `reactor-rabbitmq`, para no bloquear tampoco en los consumidores (que persisten con R2DBC).
+
+## 7.4 Observabilidad (trazas y logs)
+
+El enunciado no la exige, pero en una arquitectura distribuida es la forma de responder "¿qué pasó con esta petición?" y de que el *Administrador del sistema* supervise los servicios.
+
+| Pieza | Decisión |
+|---|---|
+| Instrumentación | **Agente Java de OpenTelemetry** (2.31.1), cargado con `-javaagent`. Instrumenta automáticamente Gateway, WebFlux, `WebClient`, R2DBC, el cliente de RabbitMQ y Logback. Estándar abierto: API, SDK y protocolo OpenTelemetry, sin dependencia de un proveedor |
+| Propagación | W3C `traceparent` entre el Gateway, los servicios y (objetivo) los mensajes de RabbitMQ |
+| Trazas | Exportadas por OTLP a **Jaeger** (UI `:16686`): árbol de tiempos Gateway → Citas → Pacientes, con las consultas SQL |
+| Logs | Consola con `trace_id`/`span_id` y exportación por OTLP a **Seq** (UI `:8090`): se filtran por `TraceId` los logs de todos los servicios de una misma petición |
+| Respuesta al cliente | Cabecera `X-Trace-Id` en cada respuesta, para buscar la petición en Jaeger o Seq |
+| Salud y métricas | `/actuator/health` con detalle de base de datos, RabbitMQ y Eureka; `/actuator/metrics` |
+| Independencia | Si Jaeger o Seq no están disponibles, el negocio funciona igual. Las pruebas y el CI corren sin agente |
+| Privacidad | Los logs son los mismos de consola (sin datos personales); no se registran cuerpos ni cabeceras; las sentencias SQL se registran con parámetros enmascarados |
+
+Se descartó Micrometer Tracing: cubre menos de forma automática (no instrumenta `reactor-rabbitmq`, R2DBC exige `r2dbc-proxy`) y su API no es OpenTelemetry.
 
 # 8. Diseño de datos
 
@@ -893,8 +914,9 @@ hospital-vida-salud/
 ├── notificaciones-service/
 ├── auditoria-service/
 ├── infra/
-│   ├── docker-compose.yml        # PostgreSQL + RabbitMQ
+│   ├── docker-compose.yml        # PostgreSQL, RabbitMQ, Jaeger, Seq
 │   └── postgres/init/            # crea una BD y un usuario por servicio
+├── scripts/                      # preparar entorno, agente OTel, iniciar/detener todo
 ├── docs/                         # documento técnico, specs, evidencias, postman/
 ├── .github/workflows/ci.yml
 ├── .gitignore
@@ -969,15 +991,18 @@ jobs:
 *(Se completará con comandos verificados al terminar la implementación; esta es la secuencia prevista.)*
 
 ```bash
-# 1. Infraestructura (PostgreSQL + RabbitMQ)
+# 1. Infraestructura (PostgreSQL, RabbitMQ, Jaeger, Seq)
 scripts/preparar-entorno.sh          # crea infra/.env con contraseñas aleatorias (no versionado)
 docker compose -f infra/docker-compose.yml up -d
 source scripts/entorno-dev.sh        # exporta variables para los servicios
+scripts/descargar-otel-agent.sh      # agente OpenTelemetry (trazas y logs)
 
 # 2. Compilar y probar
 ./mvnw verify
 
-# 3. Arrancar, en este orden (o todo junto: ./mvnw -DskipTests package && scripts/iniciar-todo.sh)
+# 3. Arrancar todo con el agente OTel (recomendado):
+./mvnw -DskipTests package && scripts/iniciar-todo.sh
+#    o uno por uno, en este orden (sin trazas):
 ./mvnw -pl eureka-server spring-boot:run
 ./mvnw -pl api-gateway spring-boot:run
 ./mvnw -pl pacientes-service spring-boot:run
@@ -992,6 +1017,8 @@ source scripts/entorno-dev.sh        # exporta variables para los servicios
 #   RabbitMQ:  http://localhost:15672
 #   Swagger:   http://localhost:808x/swagger-ui.html (cada servicio)
 #   Postman:   docs/postman/
+#   Jaeger:    http://localhost:16686   (trazas; buscar el X-Trace-Id de una respuesta)
+#   Seq:       http://localhost:8090    (logs; filtrar TraceId = '...')
 ```
 
 # 14. Limitaciones y mejoras futuras
@@ -1003,7 +1030,10 @@ source scripts/entorno-dev.sh        # exporta variables para los servicios
 | Consistencia entre servicios | Reglas de negocio que evitan la carrera atención/cancelación + DLQ | Saga con compensación |
 | Tolerancia a fallos síncronos | Timeout + 1 reintento | *Circuit breaker* (Resilience4j) |
 | Aislamiento de BD | Una instancia, una BD por servicio | Instancia por servicio |
-| Observabilidad | Logs y `actuator/health` | Trazas distribuidas (Micrometer Tracing), métricas |
+| Métricas | `/actuator/metrics` sin backend | Exportar métricas por OTLP a Prometheus/Grafana |
+| Trazas | Jaeger en memoria (se pierden al reiniciar); muestreo 100 % | Almacenamiento persistente; muestreo parcial en producción |
+| Traza a través de RabbitMQ | Objetivo con el agente OTel; si no se logra, cada consumo aparece como traza separada | Propagación manual de `traceparent` en el consumidor |
+| Retención de logs en Seq | Sin política | Retención configurada en Seq |
 | Configuración | Variables de entorno | Spring Cloud Config |
 | Tiempos de Eureka | Autopreservación desactivada y latidos de 5 s para que la demostración muestre bajas rápido | Valores por defecto en producción |
 | Exposición de actuator | `/actuator/gateway/routes` expuesto como evidencia | No exponerlo en producción |
@@ -1029,9 +1059,10 @@ source scripts/entorno-dev.sh        # exporta variables para los servicios
 6. `notificaciones-service` (eventos de paciente y cita) y `auditoria-service`.
 7. `atenciones-service` (llamada síncrona a Citas, evento `atencion.registrada`, consumidor en Citas).
 8. `pagos-service` (llamada síncrona a Pacientes, validaciones de monto y operación).
-9. Workflow de CI, Swagger, colección Postman, README y evidencias.
-10. Repositorio en GitHub y ciclo de fallo controlado.
-11. **Prioridad baja, al final:** notificaciones de `atencion.registrada` y `pago.*`; guía de sustentación; Dockerfiles de servicios (opcional).
+9. Observabilidad: Jaeger y Seq en Compose, agente OTel en los scripts, `X-Trace-Id`, health con detalle.
+10. Workflow de CI, Swagger, colección Postman, README y evidencias.
+11. Repositorio en GitHub y ciclo de fallo controlado.
+12. **Prioridad baja, al final:** traza continua a través de RabbitMQ; notificaciones de `atencion.registrada` y `pago.*`; guía de sustentación; Dockerfiles de servicios (opcional).
 
 Se hacen **commits locales pequeños y descriptivos** durante todo el proceso (enunciado §25.3), con el repositorio remoto agregado al final.
 
@@ -1049,7 +1080,7 @@ Se hacen **commits locales pequeños y descriptivos** durante todo el proceso (e
 | 8 | Reactiva y R2DBC | 2 | §7, §8 |
 | 9 | Pruebas automatizadas | 1 | §10; reporte de Surefire |
 | 10 | CI | 2 | §11; capturas rojo/verde |
-| 11 | Documentación, evidencias, sustentación | 1.5 | Este documento, README, carpeta `docs/evidencias` |
+| 11 | Documentación, evidencias, sustentación | 1.5 | Este documento, README, carpeta `docs/evidencias`; observabilidad (§7.4) como valor agregado |
 
 ## 15.3 Lista de evidencias a capturar
 
@@ -1068,3 +1099,5 @@ Se hacen **commits locales pequeños y descriptivos** durante todo el proceso (e
 - [ ] Salida de `./mvnw verify` local con todas las pruebas en verde.
 - [ ] GitHub Actions: ejecución exitosa.
 - [ ] GitHub Actions: ejecución fallida controlada y su corrección.
+- [ ] Jaeger: traza de `POST /api/citas` (Gateway → Citas → Pacientes, con SQL) y traza con Pacientes caído (`503`).
+- [ ] Seq: logs de varios servicios filtrados por un mismo `TraceId`.

@@ -137,11 +137,18 @@ Contenido **exacto** (nada más):
 
 Nombre de colas y DLQ de la spec: `notificaciones.cola` → `notificaciones.dlq`, `auditoria.cola` → `auditoria.dlq`, `citas.atenciones.cola` → `citas.atenciones.dlq`.
 
+### 5.2.1 Observabilidad (spec 08)
+
+| Clase | Descripción |
+|---|---|
+| `TraceIdRespuestaFilter` | `WebFilter` que agrega `X-Trace-Id` a cada respuesta con el `traceId` actual de OpenTelemetry (`io.opentelemetry:opentelemetry-api`). Sin agente, no agrega nada |
+| `RabbitHealthIndicator` | Indicador de salud `rabbit`: `UP` si la conexión de `reactor-rabbitmq` está abierta |
+
 ### 5.3 Cliente HTTP síncrono
 
 | Clase | Descripción |
 |---|---|
-| `ClienteHttpFactory` | Método `WebClient crear(WebClient.Builder balanceado, String baseUrl)`. Cada servicio declara su `@Bean @LoadBalanced WebClient.Builder` y obtiene el cliente con `baseUrl = http://<nombre-servicio>` |
+| `ClienteHttpFactory` | Método `WebClient crear(WebClient.Builder balanceado, String baseUrl)`. Cada servicio declara su `@Bean @LoadBalanced WebClient.Builder` y obtiene el cliente con `baseUrl = http://<nombre-servicio>`. La propagación de `traceparent` la hace el agente OTel sin configuración adicional |
 | `PoliticaResiliencia` | Utilidad con `<T> Mono<T> aplicar(Mono<T>)`: `.timeout(Duration.ofSeconds(2))` y `.retryWhen(Retry.fixedDelay(1, Duration.ofMillis(200)).filter(esErrorDeRed))`, donde `esErrorDeRed` = `WebClientRequestException`/`ConnectException`, **nunca** respuestas 4xx/5xx. Un `TimeoutException` no se reintenta |
 
 Traducción de fallos de llamadas síncronas (la hace el cliente de cada servicio, no el controlador):
@@ -173,11 +180,13 @@ Todos los valores sensibles vienen de **variables de entorno**; el repositorio s
 | `RABBIT_USER`, `RABBIT_PASSWORD` | credenciales | usuario por defecto `hospital`; **contraseña sin defecto** |
 | `EUREKA_URL` | `eureka.client.service-url.defaultZone` | `http://localhost:8761/eureka` |
 
-* `application.yml` de cada servicio: `spring.application.name` (igual al nombre del módulo), `server.port` (del documento §3.2), `eureka.client...`, `spring.r2dbc.url=r2dbc:postgresql://${DB_HOST}:${DB_PORT}/${...}`, `hospital.rabbit.*`, `management.endpoints.web.exposure.include=health,info`.
+* `application.yml` de cada servicio: `spring.application.name` (igual al nombre del módulo), `server.port` (del documento §3.2), `eureka.client...`, `spring.r2dbc.url=r2dbc:postgresql://${DB_HOST}:${DB_PORT}/${...}`, `hospital.rabbit.*`, `management.endpoints.web.exposure.include=health,info,metrics`, `management.endpoint.health.show-details=always` y el patrón de log con `trace_id`/`span_id` (spec 08 §4).
 * Un script `scripts/entorno-dev.sh` (en el repositorio, **sin** contraseñas reales) hace `source infra/.env` y exporta las variables para ejecutar los servicios localmente.
 * Perfil `test`: `application-test.yml` con valores dummy; las pruebas de integración inyectan la URL de los contenedores por `@DynamicPropertySource`.
 
 ## 8. Registro de eventos (logs)
+
+* Los logs van a consola (con `trace_id`/`span_id`) y, cuando el servicio corre con el agente OTel, también a **Seq** por OTLP (spec 08).
 
 * `slf4j` (SLF4J + Logback por defecto). Nivel `INFO` para eventos de negocio (`cita confirmada id=… `), `ERROR` para fallos.
 * **Prohibido** registrar: número de documento, nombres, apellidos, teléfono, correo, dirección. Se registran solo ids (UUID) y códigos.
