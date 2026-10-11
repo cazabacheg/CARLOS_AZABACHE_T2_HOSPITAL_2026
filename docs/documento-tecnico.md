@@ -1129,16 +1129,16 @@ Los resultados corresponden a la ejecución real de la solución; las capturas y
 
 | Módulo | Pruebas | Tipo |
 |---|---|---|
-| `hospital-commons` | 29 | unitarias + integración con RabbitMQ real |
+| `hospital-commons` | 35 | unitarias + integración con RabbitMQ real |
 | `eureka-server` | 3 | arranque y registro |
-| `api-gateway` | 6 | rutas, enrutamiento, errores |
+| `api-gateway` | 7 | rutas, enrutamiento, errores |
 | `pacientes-service` | 72 | unitarias, controlador, PostgreSQL y RabbitMQ reales |
 | `citas-service` | 105 | ídem, incluida la matriz completa de transiciones |
 | `atenciones-service` | 61 | ídem |
 | `pagos-service` | 80 | ídem, incluida idempotencia concurrente |
 | `notificaciones-service` | 45 | ídem |
 | `auditoria-service` | 48 | ídem, incluidos los *triggers* de inmutabilidad |
-| **Total** | **449** | |
+| **Total** | **456** | |
 
 Los casos del enunciado §24 están cubiertos: registro válido, rechazo de duplicado, registro y consulta de cita, transición no permitida, publicación y consumo de un evento, monto de pago inválido y recurso inexistente.
 

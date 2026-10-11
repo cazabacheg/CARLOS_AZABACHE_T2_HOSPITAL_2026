@@ -17,6 +17,7 @@ Capturas y salidas del sistema en ejecución (2026-10-11).
 | `08a-rabbitmq-exchanges.png` | RabbitMQ, pestana Exchanges, con `hospital.eventos` resaltado. |
 | `08b-rabbitmq-colas.png` | RabbitMQ, pestana Queues (colas y .dlq) con totales publicados/entregados/ack. |
 | `09-postgres-persistencia.png` | Conteos y filas por tabla y trigger de inmutabilidad ("evento_auditoria es inmutable"). |
+| `10-mvnw-verify-resumen.png` | Resultado de `./mvnw verify`: BUILD SUCCESS en los 9 módulos y 456 pruebas, 0 fallos, 0 errores. |
 
 ## Integración continua y políticas de rama
 
