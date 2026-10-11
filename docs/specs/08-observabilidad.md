@@ -173,4 +173,4 @@ La instrumentación del agente se valida con **evidencias** (§12): depende del 
 | D-45 | **Aprobado (revisado):** **agente Java de OpenTelemetry** 2.31.1, sin Micrometer Tracing ni módulo nuevo; 9 módulos | Micrometer Tracing + puente OTel en un módulo `hospital-observabilidad` |
 | D-46 | **Aprobado:** muestreo 100 % y health con detalle siempre (demostración) | Muestreo parcial / detalle solo autorizado |
 | D-47 | **Aprobado:** se elimina el `X-Request-Id` casero; `traceparent` + `X-Trace-Id` en la respuesta | Mantener ambos |
-| D-48 | **Aprobado:** nivel 3 con prioridad baja; si no se completa, se documenta | Hacerlo ahora |
+| D-48 | **Aprobado:** nivel 3 con prioridad baja; si no se completa, se documenta. **Resultado: se logró sin código propio** (el agente instrumenta el cliente AMQP y la traza continúa en los consumidores) | Hacerlo ahora |

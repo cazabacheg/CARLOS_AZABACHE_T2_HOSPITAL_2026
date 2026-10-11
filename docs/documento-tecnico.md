@@ -611,7 +611,7 @@ El enunciado no la exige, pero en una arquitectura distribuida es la forma de re
 | Pieza | Decisión |
 |---|---|
 | Instrumentación | **Agente Java de OpenTelemetry** (2.31.1), cargado con `-javaagent`. Instrumenta automáticamente Gateway, WebFlux, `WebClient`, R2DBC, el cliente de RabbitMQ y Logback. Estándar abierto: API, SDK y protocolo OpenTelemetry, sin dependencia de un proveedor |
-| Propagación | W3C `traceparent` entre el Gateway, los servicios y (objetivo) los mensajes de RabbitMQ |
+| Propagación | W3C `traceparent` entre el Gateway, los servicios y los mensajes de RabbitMQ: el agente instrumenta el cliente AMQP y **una sola traza** cubre `POST` → SQL → publicación → consumo en Notificaciones y Auditoría (verificado, §16) |
 | Trazas | Exportadas por OTLP a **Jaeger** (UI `:16686`): árbol de tiempos Gateway → Citas → Pacientes, con las consultas SQL |
 | Logs | Consola con `trace_id`/`span_id` y exportación por OTLP a **Seq** (UI `:8090`): se filtran por `TraceId` los logs de todos los servicios de una misma petición |
 | Respuesta al cliente | Cabecera `X-Trace-Id` en cada respuesta, para buscar la petición en Jaeger o Seq |
@@ -988,7 +988,7 @@ jobs:
 
 # 13. Cómo ejecutar la solución y las pruebas
 
-*(Se completará con comandos verificados al terminar la implementación; esta es la secuencia prevista.)*
+*Comandos verificados en la máquina de desarrollo (Ubuntu 24.04, JDK 21, Docker 29).*
 
 ```bash
 # 1. Infraestructura (PostgreSQL, RabbitMQ, Jaeger, Seq)
@@ -1002,6 +1002,7 @@ scripts/descargar-otel-agent.sh      # agente OpenTelemetry (trazas y logs)
 
 # 3. Arrancar todo con el agente OTel (recomendado):
 ./mvnw -DskipTests package && scripts/iniciar-todo.sh
+#    o solo algunos: scripts/iniciar-todo.sh eureka-server api-gateway pacientes-service
 #    o uno por uno, en este orden (sin trazas):
 ./mvnw -pl eureka-server spring-boot:run
 ./mvnw -pl api-gateway spring-boot:run
@@ -1032,7 +1033,7 @@ scripts/descargar-otel-agent.sh      # agente OpenTelemetry (trazas y logs)
 | Aislamiento de BD | Una instancia, una BD por servicio | Instancia por servicio |
 | Métricas | `/actuator/metrics` sin backend | Exportar métricas por OTLP a Prometheus/Grafana |
 | Trazas | Jaeger en memoria (se pierden al reiniciar); muestreo 100 % | Almacenamiento persistente; muestreo parcial en producción |
-| Traza a través de RabbitMQ | Objetivo con el agente OTel; si no se logra, cada consumo aparece como traza separada | Propagación manual de `traceparent` en el consumidor |
+| Traza a través de RabbitMQ | Funciona con el agente OTel sin código propio; depende de que los servicios se ejecuten con el agente | — |
 | Retención de logs en Seq | Sin política | Retención configurada en Seq |
 | Configuración | Variables de entorno | Spring Cloud Config |
 | Tiempos de Eureka | Autopreservación desactivada y latidos de 5 s para que la demostración muestre bajas rápido | Valores por defecto en producción |
@@ -1046,6 +1047,12 @@ scripts/descargar-otel-agent.sh      # agente OpenTelemetry (trazas y logs)
 | Propiedad de la tabla de auditoría | La crea `auditoria_user`, que como dueño podría eliminar los *triggers* | Tabla de un rol administrador; el servicio solo con `INSERT`/`SELECT` |
 | Pago y reserva | Confirmar una cita no exige pago | Regla "cita pagada para confirmar" vía consulta o evento de Pagos |
 | Despliegue | Docker Compose local | Imágenes en un registro y despliegue automatizado |
+
+**Notas de ejecución**
+
+* Seq exige cambiar la contraseña de `admin` en el primer acceso (la inicial es `SEQ_ADMIN_PASSWORD` de `infra/.env`).
+* Si la máquina se reinicia, los contenedores vuelven solos (`restart: unless-stopped`); los procesos Java se levantan de nuevo con `scripts/iniciar-todo.sh`.
+* Para demostrar el sistema un día u hora fuera de la agenda (por defecto lunes a sábado, 08:00–17:30), arranque Citas con `AGENDA_DIAS_ATENCION`, `AGENDA_HORA_INICIO` y `AGENDA_HORA_ULTIMO_INICIO`.
 
 # 15. Plan de implementación y trazabilidad con la rúbrica
 
@@ -1101,3 +1108,42 @@ Se hacen **commits locales pequeños y descriptivos** durante todo el proceso (e
 - [ ] GitHub Actions: ejecución fallida controlada y su corrección.
 - [ ] Jaeger: traza de `POST /api/citas` (Gateway → Citas → Pacientes, con SQL) y traza con Pacientes caído (`503`).
 - [ ] Seq: logs de varios servicios filtrados por un mismo `TraceId`.
+
+# 16. Resultados de la verificación
+
+Los resultados corresponden a la ejecución real de la solución; las capturas y salidas están en [`docs/evidencias/`](evidencias/README.md).
+
+## 16.1 Pruebas automatizadas
+
+`./mvnw --batch-mode verify` en la raíz: **BUILD SUCCESS** en los 9 módulos, 0 fallos, 0 errores.
+
+| Módulo | Pruebas | Tipo |
+|---|---|---|
+| `hospital-commons` | 29 | unitarias + integración con RabbitMQ real |
+| `eureka-server` | 3 | arranque y registro |
+| `api-gateway` | 6 | rutas, enrutamiento, errores |
+| `pacientes-service` | 72 | unitarias, controlador, PostgreSQL y RabbitMQ reales |
+| `citas-service` | 105 | ídem, incluida la matriz completa de transiciones |
+| `atenciones-service` | 61 | ídem |
+| `pagos-service` | 80 | ídem, incluida idempotencia concurrente |
+| `notificaciones-service` | 45 | ídem |
+| `auditoria-service` | 48 | ídem, incluidos los *triggers* de inmutabilidad |
+| **Total** | **449** | |
+
+Los casos del enunciado §24 están cubiertos: registro válido, rechazo de duplicado, registro y consulta de cita, transición no permitida, publicación y consumo de un evento, monto de pago inválido y recurso inexistente.
+
+## 16.2 Flujo funcional de punta a punta
+
+La colección de Postman (`docs/postman/`) ejecutada con Newman contra el Gateway y los 8 procesos reales: **49 peticiones, 86 aserciones, 0 fallos**. Cubre el flujo del enunciado §27/§28: paciente → duplicado rechazado → cita → choque de agenda → confirmación → evento → atención → cita `ATENDIDA` por evento → anulación (la cita pasa a `CANCELADA`) → pagos con idempotencia → notificaciones y auditoría.
+
+## 16.3 Resiliencia
+
+Con `pacientes-service` detenido:
+
+* `POST /api/citas` responde `503 SERVICIO_PACIENTES_NO_DISPONIBLE` (con el servicio aún en Eureka y también una vez expulsado), sin crear la cita.
+* `GET /api/citas` y el resto de operaciones que no dependen de Pacientes siguen funcionando.
+* Al volver a arrancar, el servicio se registra de nuevo en Eureka y se reanuda el flujo.
+
+## 16.4 Observabilidad
+
+Una petición `POST /api/pacientes` por el Gateway produce **una traza de 17 *spans*** en Jaeger: Gateway → Pacientes → consultas SQL (R2DBC) → publicación en RabbitMQ → consumo en Notificaciones y en Auditoría, con sus `INSERT`. En Seq, filtrando por ese `TraceId`, aparecen los logs de los tres servicios. La respuesta HTTP incluye `X-Trace-Id` para localizar la petición.
