@@ -99,7 +99,7 @@ class PagoRepositoryIT {
 
     @Test
     void secuenciaGeneraNumerosCrecientes() {
-        StepVerifier.create(secuencia.siguiente().zipWith(secuencia.siguiente()))
+        StepVerifier.create(secuencia.siguiente().flatMap(primero -> secuencia.siguiente().map(segundo -> reactor.util.function.Tuples.of(primero, segundo))))
                 .assertNext(par -> assertThat(par.getT2()).isGreaterThan(par.getT1())).verifyComplete();
     }
 

@@ -124,7 +124,7 @@ class CitaRepositoryIT {
 
     @Test
     void secuenciaAvanzaDeAUno() {
-        StepVerifier.create(secuencia.siguiente().zipWith(secuencia.siguiente()))
+        StepVerifier.create(secuencia.siguiente().flatMap(primero -> secuencia.siguiente().map(segundo -> reactor.util.function.Tuples.of(primero, segundo))))
                 .assertNext(par -> assertThat(par.getT2()).isEqualTo(par.getT1() + 1))
                 .verifyComplete();
     }
