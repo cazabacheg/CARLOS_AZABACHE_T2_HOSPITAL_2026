@@ -1,0 +1,51 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 2000
+            response-timeout: 10s
+          routes:
+            - id: pacientes
+              uri: lb://pacientes-service
+              predicates: [ "Path=/api/pacientes/**" ]
+            - id: citas
+              uri: lb://citas-service
+              predicates: [ "Path=/api/citas/**" ]
+            - id: atenciones
+              uri: lb://atenciones-service
+              predicates: [ "Path=/api/atenciones/**" ]
+            - id: pagos
+              uri: lb://pagos-service
+              predicates: [ "Path=/api/pagos/**" ]
+            - id: notificaciones
+              uri: lb://notificaciones-service
+              predicates: [ "Path=/api/notificaciones/**" ]
+            - id: auditoria
+              uri: lb://auditoria-service
+              predicates: [ "Path=/api/auditoria/**" ]
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 10
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{trace_id:-},%X{span_id:-}]"
