@@ -3,6 +3,7 @@ services:
   postgres:
     image: postgres:16
     container_name: hvs-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_ADMIN_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
@@ -26,6 +27,7 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: hvs-rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBIT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD}
@@ -44,6 +46,7 @@ services:
   jaeger:
     image: jaegertracing/jaeger:2.21.0
     container_name: hvs-jaeger
+    restart: unless-stopped
     ports:
       - "127.0.0.1:16686:16686"
       - "127.0.0.1:4318:4318"
@@ -51,6 +54,7 @@ services:
   seq:
     image: datalust/seq:2026.1.17114
     container_name: hvs-seq
+    restart: unless-stopped
     environment:
       ACCEPT_EULA: "Y"
       SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD}
